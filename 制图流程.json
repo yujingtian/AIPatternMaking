@@ -1,0 +1,251 @@
+{
+  "garment_type": "女式无弹直筒中腰牛仔裤",
+  "process_name": "工业级无弹直筒中腰牛仔裤打版流程（含材质解耦+选择性缩水+AAMA标准）",
+  "input_parameters": {
+    "base_measurements": {
+      "W": "净中腰围（肚脐下方约2-4cm处）",
+      "H": "净臀围",
+      "Knee": "净膝围",
+      "Ankle": "净脚口围",
+      "L": "裤长（含腰头）",
+      "Rise": "立裆深（直裆纵向高度，含腰头）",
+      "FCL": "前浪长（曲线弧长，含腰头）",
+      "BCL": "后浪长（曲线弧长，含腰头）"
+    },
+    "ease_parameters": {
+      "Ease_W": "中腰围松量（默认1-1.5cm）",
+      "Ease_H": "臀围松量（默认3-4cm）",
+      "Ease_Knee": "膝围松量（默认4-6cm）",
+      "Ease_Ankle": "脚口松量"
+    },
+    "shrinkage_parameters": {
+      "Shell_Warp": "主面料经向缩水率%（如3）",
+      "Shell_Weft": "主面料纬向缩水率%（如2）",
+      "Lining_Warp": "里料经向缩水率%（通常为0或极小值）",
+      "Lining_Weft": "里料纬向缩水率%（通常为0或极小值）"
+    },
+    "design_parameters": {
+      "Waistband_Width": "腰头宽（默认4cm）",
+      "Waistband_Curvature": "腰头曲率差值（上下口径差，决定腰部贴合度）",
+      "Side_Seam_Suppression": "侧缝腰臀差吸收总量（中腰默认约4cm）",
+      "Yoke_Height": "育克高（默认10cm，侧缝处高度）",
+      "Yoke_Depth": "育克后中下落量（默认2cm）",
+      "Back_Lift": "后浪起翘（中腰款默认3.5cm - 4cm）",
+      "Front_Center_Inclination": "前中倒进（中腰款默认0.8cm - 1.0cm）",
+      "Crotch_Drop": "后片下落（默认0.8cm，提供坐姿量）",
+      "Pocket_Width": "后袋口宽（默认13.5cm）",
+      "Pocket_Height": "后袋高（默认14.5cm）",
+      "Pocket_Angle": "后袋倾斜角（默认18度）",
+      "Hip_Line_Ratio": "臀围线位置比例（默认0.66）",
+      "Fly_Length": "门襟长（默认13-14cm，对应拉链长度）"
+    },
+    "validation_rules": {
+      "ankle_knee_check": "Net_Ankle <= Net_Knee + 1.5 // 阻断极值，防止突变为微喇裤",
+      "hip_ratio_bounds": "0.60 <= Hip_Line_Ratio <= 0.70",
+      "waist_suppression_check": "Side_Seam_Suppression <= (Net_H - Net_W) / 2"
+    }
+  },
+  "coordinate_system": {
+    "origin": "前中线与腰围线交点 (0,0)",
+    "x_axis": "向右为正（侧缝方向），向左为负（浪底方向）",
+    "y_axis": "向下为正（纵向长度）"
+  },
+  "final_patterns": [
+    { "name": "前裤片", "material": "Shell", "count": 2, "mirror": true },
+    { "name": "后裤片", "material": "Shell", "count": 2, "mirror": true },
+    { "name": "育克", "material": "Shell", "count": 2, "mirror": true },
+    { "name": "弯腰头", "material": "Shell", "count": 1, "mirror": false, "unfold_required": true },
+    { "name": "前袋贴", "material": "Shell", "count": 2, "mirror": true },
+    { "name": "后贴袋", "material": "Shell", "count": 2, "mirror": true },
+    { "name": "表袋", "material": "Shell", "count": 1, "mirror": false },
+    { "name": "门襟", "material": "Shell", "count": 1, "mirror": false },
+    { "name": "里襟", "material": "Shell", "count": 1, "mirror": false },
+    { "name": "串带袢", "material": "Shell", "count": 5, "mirror": false },
+    { "name": "前袋布", "material": "Lining", "count": 2, "mirror": true },
+    { "name": "腰头衬", "material": "Interlining", "count": 1, "mirror": false, "unfold_required": true, "derived_from": "弯腰头" },
+    { "name": "门襟衬", "material": "Interlining", "count": 1, "mirror": false, "derived_from": "门襟" }
+  ],
+  "process_steps": [
+    {
+      "step_id": 1,
+      "step_name": "净尺寸与几何骨架推导",
+      "description": "基础框架建立，释放横裆与浪底松量",
+      "calculations": [
+        "Net_W = W + Ease_W",
+        "Net_H = H + Ease_H",
+        "Net_Knee = Knee + Ease_Knee",
+        "Net_Ankle = Ankle + Ease_Ankle",
+        "Waist_Line_Y = 0",
+        "Thigh_Line_Y = Rise - Waistband_Width",
+        "Hip_Line_Y = Thigh_Line_Y * Hip_Line_Ratio",
+        "Ankle_Line_Y = L - Waistband_Width",
+        "Knee_Line_Y = Thigh_Line_Y + (Ankle_Line_Y - Thigh_Line_Y) / 2 - 4",
+        "Front_Crotch_Width = Net_H / 20 + 0.5",
+        "Back_Crotch_Width = Net_H / 10",
+        "Front_Thigh_Width = Net_H / 4 - 1.5 + Front_Crotch_Width",
+        "Back_Thigh_Width = Net_H / 4 + 1.5 + Back_Crotch_Width",
+        "Front_Crease_X = Front_Thigh_Width / 2 - Front_Crotch_Width",
+        "Back_Crease_X = Back_Thigh_Width / 2 - Back_Crotch_Width",
+        "Front_Side_Suppression = Side_Seam_Suppression * 0.4",
+        "Back_Side_Suppression = Side_Seam_Suppression * 0.6",
+        "Drafted_FW = (Net_H / 4 - 1.5 - Front_Side_Suppression) - Front_Center_Inclination",
+        "Drafted_BW = (Net_H / 4 + 1.5 - Back_Side_Suppression)",
+        "YokeDart = Math.max(0.5, (Drafted_FW + Drafted_BW) - Net_W / 2)"
+      ]
+    },
+    {
+      "step_id": 2,
+      "step_name": "前片关键点与曲线拟合",
+      "points": {
+        "F1_adj": "(Front_Center_Inclination, Waist_Line_Y)",
+        "F2": "(0, Hip_Line_Y)",
+        "F3": "(0, Thigh_Line_Y)",
+        "F4": "(-Front_Crotch_Width, Thigh_Line_Y)",
+        "F5": "(Net_H / 4 - 1.5 - Front_Side_Suppression, Waist_Line_Y)",
+        "F6": "(Net_H / 4 - 1.5, Hip_Line_Y)",
+        "F7": "(Front_Thigh_Width - Front_Crotch_Width, Thigh_Line_Y)",
+        "F8": "(Front_Crease_X + (Net_Knee/2 - 1)/2, Knee_Line_Y)",
+        "F9": "(Front_Crease_X - (Net_Knee/2 - 1)/2, Knee_Line_Y)",
+        "F10": "(Front_Crease_X + (Net_Ankle/2 - 1)/2, Ankle_Line_Y)",
+        "F11": "(Front_Crease_X - (Net_Ankle/2 - 1)/2, Ankle_Line_Y)"
+      },
+      "geometry_constraints": {
+        "front_crotch": "F1_adj → F2 → (F3, F4)，F1_adj到F3为平滑贝塞尔曲线",
+        "front_side_seam": "F5 → F6 → F7 → F8 为平滑样条，F8 → F10 为绝对直线",
+        "front_inseam": "F4 → F9 为平滑样条，F9 → F11 为绝对直线",
+        "front_hem": "F11 → F10 水平直线",
+        "grainline": "X = Front_Crease_X，贯穿全片，与 Y 轴绝对平行"
+      }
+    },
+    {
+      "step_id": 3,
+      "step_name": "后片关键点计算与拔裆工艺",
+      "points": {
+        "B1": "(0, Waist_Line_Y - Back_Lift)",
+        "B2": "(0, Hip_Line_Y)",
+        "B3": "(0, Thigh_Line_Y + Crotch_Drop)",
+        "B4": "(-Back_Crotch_Width, Thigh_Line_Y + Crotch_Drop)",
+        "B5": "(Net_H / 4 + 1.5 - Back_Side_Suppression, Waist_Line_Y - Back_Lift)",
+        "B6": "(Net_H / 4 + 1.5, Hip_Line_Y)",
+        "B7": "(Back_Thigh_Width - Back_Crotch_Width, Thigh_Line_Y + Crotch_Drop)",
+        "B8": "(Back_Crease_X + (Net_Knee/2 + 1)/2, Knee_Line_Y)",
+        "B9": "(Back_Crease_X - (Net_Knee/2 + 1)/2, Knee_Line_Y)",
+        "B10": "(Back_Crease_X + (Net_Ankle/2 + 1)/2, Ankle_Line_Y)",
+        "B11": "(Back_Crease_X - (Net_Ankle/2 + 1)/2, Ankle_Line_Y)"
+      },
+      "geometry_constraints": {
+        "back_crotch": "B1 → B2 → (B3, B4)，B1到B3为平滑贝塞尔曲线",
+        "back_side_seam": "B5 → B6 → B7 → B8 为样条，B8 → B10 为绝对直线",
+        "back_inseam": "B4 → B9 为样条，B9 → B11 为绝对直线",
+        "back_hem": "B11 → B10 水平直线",
+        "grainline": "X = Back_Crease_X，贯穿全片，与 Y 轴绝对平行"
+      }
+    },
+    {
+      "step_id": 4,
+      "step_name": "育克分割与省量旋转闭合",
+      "operations": [
+        "生成育克初始分割线: 侧缝 Y1(B5.x, B5.y + Yoke_Height) → 后中 Y2(B1.x, B1.y + Yoke_Height - Yoke_Depth)",
+        "定位省尖: 初始分割线中点向下 3cm",
+        "执行仿射旋转: 以省尖为圆心，切开育克并闭合 YokeDart 宽度",
+        "曲线重构(Trueing): 光顺重绘育克上下沿，强制育克下口弧长 = 后片主片上口弧长",
+        "设定纱向(Grainline): 育克纱向线与后中缝(CB)平行，提供斜裁微弹效果"
+      ]
+    },
+    {
+      "step_id": 5,
+      "step_name": "零部件与辅料派生",
+      "components": {
+        "back_pocket": {
+          "reference_point": "育克分割线中点下方2cm处",
+          "center_point": "相对于后中线偏移Net_H/8",
+          "width": "Pocket_Width",
+          "height": "Pocket_Height",
+          "rotation": "Pocket_Angle"
+        },
+        "front_pocket": {
+          "type": "经典5袋款J型弯袋",
+          "opening_start": "前腰线上距前侧缝点向内 6-7cm",
+          "opening_curve": "落点距侧缝腰点 8-9cm",
+          "coin_pocket_loc": "表袋定位于右侧袋贴，距离前腰口缝份下2cm，平行于直纱",
+          "pocket_bag_shape": "U型蝴蝶袋（底边折叠对折式），深度延伸至腰线下20cm处"
+        },
+        "waistband": {
+          "type": "大曲率弯腰头",
+          "generation_logic": "依据 Waistband_Width 和 Waistband_Curvature 构建单侧弧带",
+          "post_process": "沿后中线进行镜像展开 (Unfold)"
+        },
+        "interlining_derivation": {
+          "waistband_fusible": "复制弯腰头净样，四周缩进 0.2cm (防止粘合时溢胶)",
+          "fly_fusible": "复制门襟净样，四周缩进 0.2cm"
+        }
+      }
+    },
+    {
+      "step_id": 6,
+      "step_name": "接缝校验与闭合光顺 (Walk Seams & Trueing)",
+      "validation_logic": {
+        "inseam_match": "强制验证积分长度(B4 → B9) === 积分长度(F4 → F9) - 1.0cm",
+        "side_seam_match": "强制验证积分长度(B5 → B8) === 积分长度(F5 → F8)",
+        "waist_match": "验证成品腰头上沿总长 === Net_W",
+        "error_handling": "若误差超出 0.1cm，触发微调控制点重计算"
+      }
+    },
+    {
+      "step_id": 7,
+      "step_name": "基于材质的选择性缩水率局部仿射变换",
+      "matrix_transform": {
+        "logic": "根据裁片的 material 属性应用不同的缩放补偿矩阵",
+        "Shell_Matrix": {
+          "Scale_X": "1 / (1 - Shell_Weft / 100)",
+          "Scale_Y": "1 / (1 - Shell_Warp / 100)"
+        },
+        "Lining_Matrix": {
+          "Scale_X": "1 / (1 - Lining_Weft / 100)",
+          "Scale_Y": "1 / (1 - Lining_Warp / 100)"
+        },
+        "operation": "提取纱向线中心点为局部原点 (Cx, Cy)，对顶点执行: X_new = Cx + (X - Cx)*Scale_X, Y_new = Cy + (Y - Cy)*Scale_Y"
+      }
+    },
+    {
+      "step_id": 8,
+      "step_name": "缝份配置与高级特征 (Seam Allowances & Notches)",
+      "seam_allowance_rules": {
+        "hem": "3cm (脚口缝份沿下侧缝直角垂直向下延伸)",
+        "side_inseam_yoke": "1cm",
+        "back_crotch": "1.5cm",
+        "waistband_fly": "1cm",
+        "pocket_top_fold": "2.5cm (后贴袋上口双折边)"
+      },
+      "corner_treatments": {
+        "waistband_ends": "垂直切角 (Perpendicular Intersection)",
+        "yoke_side_seam": "镜像折角 (Mirror/Fold Intersection)，防漏边",
+        "pocket_corners": "平分角 (Bisector Intersection) 减少厚度"
+      },
+      "notch_specs": {
+        "type": "T型或I型剪口 (Slit Notch)",
+        "depth": "0.5cm (不超过缝份宽度的一半)",
+        "critical_positions": {
+          "zipper_stop": "【关键】前浪曲线 F1_adj 至 F3 的轨迹上，距离顶端 Fly_Length 处添加拉链止口剪口",
+          "inseam_pull": "后内缝上段添加 '拔缝(Stretch)' 标记对",
+          "back_crotch_mid": "后浪中点1个剪口",
+          "alignment_nodes": "臀围线、横裆线、中裆线、育克分割线对接位"
+        }
+      }
+    },
+    {
+      "step_id": 9,
+      "step_name": "DXF分层标准导出 (AAMA/ASTM D6673 规范)",
+      "dxf_layers": {
+        "1": "NET (净样线轮廓)",
+        "2": "SEAM (毛样线/外轮廓缝份)",
+        "3": "NOTCH (剪口/刀口标记点)",
+        "4": "GRAIN (纱向线，含方向箭头)",
+        "5": "TEXT (文字标注：裁片名、数量、材质、缩水率参数)",
+        "6": "STITCH (内部明线轨线：后袋双针线、表袋线)",
+        "7": "DRILL (钻孔/十字定位点：口袋四角、省尖、打结位)"
+      },
+      "export_units": "mm"
+    }
+  ]
+}
