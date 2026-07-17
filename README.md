@@ -1,0 +1,2 @@
+# AIPatternMaking
+AI制版
