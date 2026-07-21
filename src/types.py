@@ -117,12 +117,18 @@ class BackDartPoints:
     dart_inner: Tuple[float, float]     # 省内端点（靠内缝侧）
 
 
-# ==================== 新增：后片折叠腰头数据类型 ====================
+# ==================== 新增：后片腰头数据类型 ====================
 @dataclass
-class FoldedWaistbandPoints:
-    """后片折叠腰头关键点（步骤10）"""
-    top_curve: List[Tuple[float, float]]       # 画顺后的上腰头曲线采样点
-    bottom_curve: List[Tuple[float, float]]    # 画顺后的下腰头曲线采样点
+class BackWaistbandPoints:
+    """后片腰头关键点（步骤10）"""
+    # 上腰头（已有腰围线）
+    waist_outer: Tuple[float, float]       # 上腰头外缝顶点（腰围外缝顶点）
+    waist_inner: Tuple[float, float]       # 上腰头内缝顶点（腰围内缝顶点）
+    # 下腰头
+    lower_waist_outer: Tuple[float, float]  # 下腰头外端点（沿外缝向下4cm）
+    lower_waist_inner: Tuple[float, float]  # 下腰头内端点（沿后浪向下4cm）
+    # 下腰头曲线（与上腰头平行）
+    lower_waist_curve: List[Tuple[float, float]]  # 下腰头曲线采样点
 # =================================================================
 
 
@@ -140,8 +146,8 @@ class BackPatternPoints:
     waist_final: 'BackWaistFinalPoints'  # 步骤8 最终腰围线
     dart: 'BackDartPoints'           # 步骤9 腰省
     
-    # ==================== 新增：折叠腰头结果字段 ====================
-    folded_waistband: Optional['FoldedWaistbandPoints'] = None # 步骤10 后片折叠腰头 (设为Optional防报错)
+    # ==================== 新增：腰头结果字段 ====================
+    waistband: Optional['BackWaistbandPoints'] = None  # 步骤10 后片腰头 (设为Optional防报错)
     # =================================================================
 
 

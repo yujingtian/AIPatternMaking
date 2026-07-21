@@ -5,22 +5,17 @@
 脚口 / 膝围 / 立裆 / 臀围 / 腰围 五条水平参考线的 Y 坐标前后片一致
 （前后片缝合时裆线需在同一水平），后片仅在宽度上比前片宽 2cm（±1前片差）。
 """
-from typing import Optional
 import math
+from typing import Optional, List, Tuple
 
 from .types import (
     PatternParams, BoundingBox,
     BackWaistPoints, BackCrotchPoints, BackRisePoints, BackPatternPoints,
-    BackSeamPoints, BackWaistFinalPoints, BackDartPoints, KneeHemPoints
+    BackSeamPoints, BackWaistFinalPoints, BackDartPoints, KneeHemPoints,
+    BackWaistbandPoints
 )
 from .pattern_calculator import sample_bezier_curve, point_distance, lerp
 
-# ==================== 新增依赖 ====================
-from typing import List, Tuple
-from .types import FoldedWaistbandPoints
-# ==================================================
-
-# ==================== 新增辅助函数 ====================
 def get_point_at_distance(curve_points: List[Tuple[float, float]], target_dist: float) -> Tuple[float, float]:
     """沿着离散点构成的曲线，从起点开始测算指定距离，返回目标坐标"""
     acc = 0.0
@@ -34,15 +29,6 @@ def get_point_at_distance(curve_points: List[Tuple[float, float]], target_dist: 
         acc += d
         prev = cur
     return curve_points[-1]
-
-def rotate_point(origin: Tuple[float, float], point: Tuple[float, float], angle: float) -> Tuple[float, float]:
-    """绕原点旋转指定角度"""
-    ox, oy = origin
-    px, py = point
-    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
-    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
-    return (qx, qy)
-# ======================================================
 
 
 class BackPanelCalculator:
@@ -82,12 +68,10 @@ class BackPanelCalculator:
         # 步骤9: 绘制腰省
         dart = self._calculate_back_dart(waist_final)
 
-        # ==================== 新增步骤10 ====================
-        # 步骤10: 模拟折叠腰省并生成画顺后的腰头
-        folded_waistband = self._calculate_folded_waistband(
-            waist_final, dart, seam, rise, band_width=4.0
+        # 步骤10: 绘制腰头
+        waistband = self._calculate_waistband(
+            waist_final, seam, rise, band_width=4.0
         )
-        # ====================================================
 
         self.points = BackPatternPoints(
             params=self.params,
@@ -100,7 +84,7 @@ class BackPanelCalculator:
             seam=seam,
             waist_final=waist_final,
             dart=dart,
-            folded_waistband=folded_waistband # <--- 新增传参
+            waistband=waistband
         )
         return self.points
 
@@ -236,8 +220,7 @@ class BackPanelCalculator:
             rise_curve=rise_curve
         )
 
-    def _calculate_center_crease(self, bbox: BoundingBox,
-                                 crotch: BackCrotchPoints) -> float:
+    def _calculate_center_crease(self, bbox: BoundingBox, crotch: BackCrotchPoints) -> float:
         """步骤5: 绘制裤中线 (Center Crease Line)
 
         取立裆外缝顶点(0, crotch_y) 到 立裆延伸点 的立裆线段中点，
@@ -249,8 +232,7 @@ class BackPanelCalculator:
         center_crease_x = midpoint_x - 2.5
         return center_crease_x
 
-    def _calculate_back_knee_hem(self, bbox: BoundingBox,
-                                 center_crease_x: float) -> KneeHemPoints:
+    def _calculate_back_knee_hem(self, bbox: BoundingBox, center_crease_x: float) -> KneeHemPoints:
         """步骤6: 计算并定位实际膝围与脚口顶点 (Actual Knee & Hem Width)
 
         以裤中线为对称轴分配宽度。后片比前片宽，单侧宽度用 (围度/2 + 0.6*2)/2
@@ -433,57 +415,53 @@ class BackPanelCalculator:
             dart_inner=dart_inner
         )
 
-    # ==================== 新增方法: _calculate_folded_waistband ====================
-    def _calculate_folded_waistband(self, waist_final: BackWaistFinalPoints, 
-                                    dart: BackDartPoints, seam: BackSeamPoints, 
-                                    rise: BackRisePoints, band_width: float = 4.0) -> FoldedWaistbandPoints:
-        """步骤10: 模拟折叠腰省并画顺 4cm 宽的后片腰头"""
+    def _calculate_waistband(self, waist_final: BackWaistFinalPoints,
+                            seam: BackSeamPoints, rise: BackRisePoints,
+                            band_width: float = 4.0) -> BackWaistbandPoints:
+        """步骤10: 绘制腰头
+
+        从腰围外缝顶点顺着外缝线找4cm，从腰围内缝顶点顺着后浪找4cm，
+        两个点相连画一条与上腰头平行的线，叫下腰头线。
+        """
         W_out, W_in = waist_final.new_waist_outer, waist_final.new_waist_inner
-        D_out, D_in, D_tip = dart.dart_outer, dart.dart_inner, dart.dart_tip
-        
-        # 1. 提取下腰头的基础点 (向下 band_width)
+
+        # 1. 从腰围外缝顶点顺着外缝线找4cm
         full_outer = [W_out] + seam.outer_seam_curve
-        B_out = get_point_at_distance(full_outer, band_width)
-        
+        lower_waist_outer = get_point_at_distance(full_outer, band_width)
+
+        # 2. 从腰围内缝顶点顺着后浪找4cm
         full_inner = [W_in] + rise.rise_curve
-        B_in = get_point_at_distance(full_inner, band_width)
-        
-        dart_length = 11.0 
-        t_dart = band_width / dart_length
-        DB_out = (D_out[0] + t_dart * (D_tip[0] - D_out[0]), D_out[1] + t_dart * (D_tip[1] - D_out[1]))
-        DB_in = (D_in[0] + t_dart * (D_tip[0] - D_in[0]), D_in[1] + t_dart * (D_tip[1] - D_in[1]))
+        lower_waist_inner = get_point_at_distance(full_inner, band_width)
 
-        # 2. 模拟纸张折叠（坐标系旋转）
-        # 计算需要旋转的角度：使 D_in 旋转后与 D_out 重合
-        angle_out = math.atan2(D_out[1] - D_tip[1], D_out[0] - D_tip[0])
-        angle_in = math.atan2(D_in[1] - D_tip[1], D_in[0] - D_tip[0])
-        rotation_angle = angle_out - angle_in
+        # 3. 绘制下腰头曲线（与上腰头平行）
+        # 上腰头是从 W_out 到 W_in 的直线
+        # 下腰头曲线需要从 lower_waist_outer 到 lower_waist_inner，保持相似的形状
+        # 使用二次贝塞尔曲线，控制点偏移量参考上腰头的方向
 
-        # 保持左侧(外缝侧)固定，旋转右侧(内缝侧)的所有点
-        W_in_rotated = rotate_point(D_tip, W_in, rotation_angle)
-        B_in_rotated = rotate_point(D_tip, B_in, rotation_angle)
-        
-        # 此时 D_in_rotated 约等于 D_out，取均值抹平浮点误差作为折叠中心点
-        D_merged = D_out 
-        DB_merged = DB_out
+        # 计算上腰头的向量
+        waist_dx = W_in[0] - W_out[0]
+        waist_dy = W_in[1] - W_out[1]
 
-        # 3. 逆推控制点并用贝塞尔曲线画顺
-        # 计算控制点 C_top，确保二次贝塞尔曲线恰好经过省道闭合点 D_merged
-        C_top = (
-            2 * D_merged[0] - 0.5 * W_out[0] - 0.5 * W_in_rotated[0],
-            2 * D_merged[1] - 0.5 * W_out[1] - 0.5 * W_in_rotated[1]
+        # 计算控制点（中点位置，稍微调整以保持与上腰头相似的弧度）
+        # 先计算下腰头两个端点的中点
+        mid_x = (lower_waist_outer[0] + lower_waist_inner[0]) / 2
+        mid_y = (lower_waist_outer[1] + lower_waist_inner[1]) / 2
+
+        # 控制点从中点位置轻微偏移，模拟上腰头可能存在的弯曲
+        # 由于上腰头基本是直线，我们用简单的二次贝塞尔曲线
+        control_x = mid_x
+        control_y = mid_y
+
+        # 生成下腰头曲线采样点
+        lower_waist_curve = sample_bezier_curve(
+            [lower_waist_outer, (control_x, control_y), lower_waist_inner],
+            samples=20
         )
-        top_curve = sample_bezier_curve([W_out, C_top, W_in_rotated], samples=20)
 
-        # 画顺下腰围线
-        C_bot = (
-            2 * DB_merged[0] - 0.5 * B_out[0] - 0.5 * B_in_rotated[0],
-            2 * DB_merged[1] - 0.5 * B_out[1] - 0.5 * B_in_rotated[1]
+        return BackWaistbandPoints(
+            waist_outer=W_out,
+            waist_inner=W_in,
+            lower_waist_outer=lower_waist_outer,
+            lower_waist_inner=lower_waist_inner,
+            lower_waist_curve=lower_waist_curve
         )
-        bottom_curve = sample_bezier_curve([B_out, C_bot, B_in_rotated], samples=20)
-
-        return FoldedWaistbandPoints(
-            top_curve=top_curve,
-            bottom_curve=bottom_curve
-        )
-    # ==============================================================================

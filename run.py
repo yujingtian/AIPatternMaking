@@ -86,12 +86,13 @@ def print_back_points_info(points: BackPatternPoints) -> None:
     print(f"  省道中点:     ({dart.dart_mid[0]:.2f}, {dart.dart_mid[1]:.2f})")
     print(f"  省尖:         ({dart.dart_tip[0]:.2f}, {dart.dart_tip[1]:.2f})")
 
-    print(f"\n【折叠画顺后腰头 (4cm)】")
-    fw = points.folded_waistband
-    print(f"  上腰头曲线采样点数: {len(fw.top_curve)}")
-    print(f"  下腰头曲线采样点数: {len(fw.bottom_curve)}")
-    print(f"  上腰头起点(外):     ({fw.top_curve[0][0]:.2f}, {fw.top_curve[0][1]:.2f})")
-    print(f"  上腰头终点(内):     ({fw.top_curve[-1][0]:.2f}, {fw.top_curve[-1][1]:.2f})")
+    print(f"\n【后片腰头 (4cm)】")
+    wb = points.waistband
+    print(f"  上腰外顶点:     ({wb.waist_outer[0]:.2f}, {wb.waist_outer[1]:.2f})")
+    print(f"  上腰内顶点:     ({wb.waist_inner[0]:.2f}, {wb.waist_inner[1]:.2f})")
+    print(f"  下腰外顶点:     ({wb.lower_waist_outer[0]:.2f}, {wb.lower_waist_outer[1]:.2f})")
+    print(f"  下腰内顶点:     ({wb.lower_waist_inner[0]:.2f}, {wb.lower_waist_inner[1]:.2f})")
+    print(f"  下腰头曲线采样点数: {len(wb.lower_waist_curve)}")
 
     print("\n" + "="*60)
 

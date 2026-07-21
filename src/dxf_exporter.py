@@ -221,12 +221,15 @@ class DXFExporter:
         msp.add_line(pt(d.dart_outer), pt(d.dart_tip), dxfattribs={'layer': 'BACKDART'})
         msp.add_line(pt(d.dart_inner), pt(d.dart_tip), dxfattribs={'layer': 'BACKDART'})
 
-        # 步骤10: 折叠腰头（画顺后的上/下腰头曲线）
-        fw = back_points.folded_waistband
-        if fw is not None:
-            msp.add_lwpolyline([pt(p) for p in fw.top_curve],
+        # 步骤10: 绘制腰头
+        wb = back_points.waistband
+        if wb is not None:
+            # 下腰头曲线
+            msp.add_lwpolyline([pt(p) for p in wb.lower_waist_curve],
                                dxfattribs={'layer': 'BACKWAISTBAND'})
-            msp.add_lwpolyline([pt(p) for p in fw.bottom_curve],
+            # 闭合腰头裁片：上腰头(外→内) + 下腰头反向(内→外)
+            piece = [wb.waist_outer, wb.waist_inner] + list(reversed(wb.lower_waist_curve))
+            msp.add_lwpolyline([pt(p) for p in piece], close=True,
                                dxfattribs={'layer': 'BACKWAISTBAND'})
 
     def _draw_outline(self, msp: Modelspace, points: PatternPoints) -> None:
