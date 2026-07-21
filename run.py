@@ -123,7 +123,7 @@ def main():
         knee=36.0,
         hem=39.0,
         front_rise=24.0,
-        back_rise=35.0,     # 后浪参数
+        back_rise=34.5,     # 后浪参数
         pants_length=100.0,
         front_rise_curve=2.5  # 增加凹陷程度
     )
