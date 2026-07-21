@@ -12,7 +12,7 @@ from .types import (
     PatternParams, BoundingBox,
     BackWaistPoints, BackCrotchPoints, BackRisePoints, BackPatternPoints,
     BackSeamPoints, BackWaistFinalPoints, BackDartPoints, KneeHemPoints,
-    BackWaistbandPoints
+    BackWaistbandPoints, BackJitouPoints, BackPocketPoints
 )
 from .pattern_calculator import sample_bezier_curve, point_distance, lerp
 
@@ -73,6 +73,16 @@ class BackPanelCalculator:
             waist_final, seam, rise, band_width=4.0
         )
 
+        # 步骤11: 绘制机头
+        jitou = self._calculate_jitou(
+            waistband, seam, rise
+        )
+
+        # 步骤12: 绘制后口袋
+        back_pocket = self._calculate_back_pocket(
+            waist_final, dart, jitou
+        )
+
         self.points = BackPatternPoints(
             params=self.params,
             bounding_box=bounding_box,
@@ -84,7 +94,9 @@ class BackPanelCalculator:
             seam=seam,
             waist_final=waist_final,
             dart=dart,
-            waistband=waistband
+            waistband=waistband,
+            jitou=jitou,
+            back_pocket=back_pocket
         )
         return self.points
 
@@ -386,7 +398,7 @@ class BackPanelCalculator:
     def _calculate_back_dart(self, waist_final: BackWaistFinalPoints) -> BackDartPoints:
         """步骤9: 绘制腰省 (Waist Dart)
 
-        省中点取最终腰围线中点；省尖从省中点沿臀围线垂线（竖直）向下 11cm；
+        省中点取最终腰围线中点；省尖从省中点沿后腰围线的垂线向下 11cm；
         省(内/外)端点从省中点沿腰围线向两侧各 1cm（省宽共 2cm）。
         """
         wo = waist_final.new_waist_outer
@@ -395,18 +407,29 @@ class BackPanelCalculator:
         # 省中点 = 腰围线中点
         dart_mid = ((wo[0] + wi[0]) / 2.0, (wo[1] + wi[1]) / 2.0)
 
-        # 省尖 = 从省中点沿臀围线垂线(竖直)向下 11cm
+        # 计算腰围线的方向向量
+        dx_waist = wi[0] - wo[0]
+        dy_waist = wi[1] - wo[1]
+        L_waist = math.hypot(dx_waist, dy_waist)
+        ux_waist, uy_waist = dx_waist / L_waist, dy_waist / L_waist
+
+        # 计算腰围线的垂线方向 (顺时针旋转90度)
+        # 原向量 (ux, uy)，垂线为 (uy, -ux) 或 (-uy, ux)
+        # 我们选择向裤子下方的垂线方向 (Y减小的方向)
+        perp_ux = uy_waist
+        perp_uy = -ux_waist
+
+        # 省尖 = 从省中点沿腰围线的垂线向下 11cm
         dart_length = 11.0
-        dart_tip = (dart_mid[0], dart_mid[1] - dart_length)
+        dart_tip = (
+            dart_mid[0] + dart_length * perp_ux,
+            dart_mid[1] + dart_length * perp_uy
+        )
 
         # 省(内/外)端点 = 沿腰围线向两侧各 1cm
         half_width = 1.0
-        dx = wi[0] - wo[0]
-        dy = wi[1] - wo[1]
-        L = math.hypot(dx, dy)
-        ux, uy = dx / L, dy / L  # 指向内缝侧
-        dart_inner = (dart_mid[0] + half_width * ux, dart_mid[1] + half_width * uy)
-        dart_outer = (dart_mid[0] - half_width * ux, dart_mid[1] - half_width * uy)
+        dart_inner = (dart_mid[0] + half_width * ux_waist, dart_mid[1] + half_width * uy_waist)
+        dart_outer = (dart_mid[0] - half_width * ux_waist, dart_mid[1] - half_width * uy_waist)
 
         return BackDartPoints(
             dart_mid=dart_mid,
@@ -464,4 +487,202 @@ class BackPanelCalculator:
             lower_waist_outer=lower_waist_outer,
             lower_waist_inner=lower_waist_inner,
             lower_waist_curve=lower_waist_curve
+        )
+
+    def _calculate_jitou(self, waistband: BackWaistbandPoints,
+                        seam: BackSeamPoints, rise: BackRisePoints) -> BackJitouPoints:
+        """步骤11: 绘制机头
+
+        从下腰头内端点顺着后浪向下7cm找到机头内缝顶点，
+        从下腰头外端点顺着外缝向下3.5cm找到机头外缝顶点，
+        两个点直线连接。
+
+        注意：下腰头内端点已经是从腰内缝顶点向下走4cm的位置了，
+            所以机头内缝顶点需要从腰内缝顶点向下走 4cm + 7cm = 11cm；
+            同理，机头外缝顶点需要从腰外缝顶点向下走 4cm + 3.5cm = 7.5cm。
+        """
+        waist_inner = waistband.waist_inner
+        waist_outer = waistband.waist_outer
+
+        # 1. 从腰内缝顶点顺着后浪向下 4cm + 7cm = 11cm 找到机头内缝顶点
+        full_inner = [waist_inner] + rise.rise_curve
+        jitou_inner = get_point_at_distance(full_inner, 11.0)
+
+        # 2. 从腰外缝顶点顺着外缝向下 4cm + 3.5cm = 7.5cm 找到机头外缝顶点
+        full_outer = [waist_outer] + seam.outer_seam_curve
+        jitou_outer = get_point_at_distance(full_outer, 7.5)
+
+        return BackJitouPoints(
+            jitou_inner=jitou_inner,
+            jitou_outer=jitou_outer
+        )
+
+    def _calculate_back_pocket(self, waist_final: BackWaistFinalPoints,
+                              dart: BackDartPoints,
+                              jitou: BackJitouPoints) -> BackPocketPoints:
+        """步骤12: 绘制后口袋
+
+        1. 画一条与省中线和省尖连线平行并且向着外缝方向平移1.3cm的线，叫后口袋中线
+        2. 画一条与机头线平行向下2.5cm，和后口袋中线相交，交点为后口袋上中点
+        3. 从后口袋上中点出发沿着后口袋中线12cm找到后口袋下中点
+        4. 从后口袋上中点开始分别向两边延伸6cm并且垂直于后口袋中线的线，得到后口袋上内端点和后口袋上外端点
+        5. 后口袋下中点也做相同操作
+        6. 调整后口袋下内端点和下外端点，形成最终的口袋形状
+        """
+        dart_mid = dart.dart_mid
+        dart_tip = dart.dart_tip
+        jitou_inner = jitou.jitou_inner
+        jitou_outer = jitou.jitou_outer
+
+        # 1. 计算省中线和省尖连线的方向（后口袋中线的方向）
+        dart_dx = dart_tip[0] - dart_mid[0]
+        dart_dy = dart_tip[1] - dart_mid[1]
+        dart_L = math.hypot(dart_dx, dart_dy)
+        dart_ux = dart_dx / dart_L
+        dart_uy = dart_dy / dart_L
+
+        # 计算垂直于省中线，向外缝方向（X负方向）的平移向量
+        # 省中线方向是 (dart_ux, dart_uy)，逆时针旋转90度是 (-dart_uy, dart_ux)
+        # 我们需要向外缝方向平移
+        perp_ux = -dart_uy
+        perp_uy = dart_ux
+
+        # 平移1.3cm，得到口袋中线上的一个点
+        pocket_line_point = (
+            dart_mid[0] + 1.3 * perp_ux,
+            dart_mid[1] + 1.3 * perp_uy
+        )
+
+        # 口袋中线是过pocket_line_point，方向与省中线一致的直线
+        # 直线方程: p = pocket_line_point + t * (dart_ux, dart_uy)
+
+        # 2. 画一条与机头线平行向下2.5cm的线
+        jitou_dx = jitou_inner[0] - jitou_outer[0]
+        jitou_dy = jitou_inner[1] - jitou_outer[1]
+        jitou_L = math.hypot(jitou_dx, jitou_dy)
+        jitou_ux = jitou_dx / jitou_L
+        jitou_uy = jitou_dy / jitou_L
+
+        # 垂直于机头线，向下方向的向量
+        jitou_perp_ux = -jitou_uy
+        jitou_perp_uy = jitou_ux
+
+        # 取机头线中点向下平移2.5cm
+        jitou_mid = (
+            (jitou_inner[0] + jitou_outer[0]) / 2,
+            (jitou_inner[1] + jitou_outer[1]) / 2
+        )
+        parallel_line_point = (
+            jitou_mid[0] + 2.5 * jitou_perp_ux,
+            jitou_mid[1] + 2.5 * jitou_perp_uy
+        )
+
+        # 这条平行直线方程: p = parallel_line_point + s * (jitou_ux, jitou_uy)
+
+        # 求两条直线的交点（后口袋上中点）
+        # 解方程组:
+        # pocket_line_point.x + t * dart_ux = parallel_line_point.x + s * jitou_ux
+        # pocket_line_point.y + t * dart_uy = parallel_line_point.y + s * jitou_uy
+        # 写成矩阵形式:
+        # [dart_ux, -jitou_ux] [t] = [parallel_line_point.x - pocket_line_point.x]
+        # [dart_uy, -jitou_uy] [s] = [parallel_line_point.y - pocket_line_point.y]
+
+        # 用克莱姆法则求解
+        det = dart_ux * (-jitou_uy) - (-jitou_ux) * dart_uy
+        if abs(det) < 1e-9:
+            # 直线几乎平行，用另一种方式计算
+            pocket_mid_up = jitou_mid
+        else:
+            b1 = parallel_line_point[0] - pocket_line_point[0]
+            b2 = parallel_line_point[1] - pocket_line_point[1]
+            t = (b1 * (-jitou_uy) - (-jitou_ux) * b2) / det
+            pocket_mid_up = (
+                pocket_line_point[0] + t * dart_ux,
+                pocket_line_point[1] + t * dart_uy
+            )
+
+        # 3. 从后口袋上中点出发沿着后口袋中线12cm找到后口袋下中点
+        pocket_mid_down = (
+            pocket_mid_up[0] + 12.0 * dart_ux,
+            pocket_mid_up[1] + 12.0 * dart_uy
+        )
+
+        # 4. 从后口袋上中点开始分别向两边延伸6cm并且垂直于后口袋中线的线
+        # 垂直于省中线的方向是 (-dart_uy, dart_uy) 和 (dart_uy, -dart_ux)
+        pocket_perp_ux1 = -dart_uy
+        pocket_perp_uy1 = dart_ux
+        pocket_perp_ux2 = dart_uy
+        pocket_perp_uy2 = -dart_ux
+
+        pocket_up_inner = (
+            pocket_mid_up[0] + 6.0 * pocket_perp_ux1,
+            pocket_mid_up[1] + 6.0 * pocket_perp_uy1
+        )
+        pocket_up_outer = (
+            pocket_mid_up[0] + 6.0 * pocket_perp_ux2,
+            pocket_mid_up[1] + 6.0 * pocket_perp_uy2
+        )
+
+        # 5. 后口袋下中点也做相同操作
+        pocket_down_inner_orig = (
+            pocket_mid_down[0] + 6.0 * pocket_perp_ux1,
+            pocket_mid_down[1] + 6.0 * pocket_perp_uy1
+        )
+        pocket_down_outer_orig = (
+            pocket_mid_down[0] + 6.0 * pocket_perp_ux2,
+            pocket_mid_down[1] + 6.0 * pocket_perp_uy2
+        )
+
+        # 6. 从后口袋下内端点出发沿着后口袋下内端点和后口袋上内端点的连线找2cm处取点
+        # 从这个点与后口袋下中点连线，再沿着线找0.6cm，找到最终的后口袋下内端点
+        def adjust_pocket_corner(orig_corner, up_corner, mid_down):
+            # 沿着 orig_corner -> up_corner 方向找2cm处
+            dx = up_corner[0] - orig_corner[0]
+            dy = up_corner[1] - orig_corner[1]
+            L = math.hypot(dx, dy)
+            if L < 1e-9:
+                return orig_corner
+            ux = dx / L
+            uy = dy / L
+            temp_point = (
+                orig_corner[0] + 2.0 * ux,
+                orig_corner[1] + 2.0 * uy
+            )
+
+            # 从 temp_point 向 mid_down 连线，再向里（靠近mid_down）找0.6cm
+            dx2 = mid_down[0] - temp_point[0]
+            dy2 = mid_down[1] - temp_point[1]
+            L2 = math.hypot(dx2, dy2)
+            if L2 < 1e-9:
+                return temp_point
+            ux2 = dx2 / L2
+            uy2 = dy2 / L2
+
+            final_point = (
+                temp_point[0] + 0.6 * ux2,
+                temp_point[1] + 0.6 * uy2
+            )
+            return final_point
+
+        pocket_down_inner = adjust_pocket_corner(pocket_down_inner_orig, pocket_up_inner, pocket_mid_down)
+        pocket_down_outer = adjust_pocket_corner(pocket_down_outer_orig, pocket_up_outer, pocket_mid_down)
+
+        # 生成口袋轮廓
+        pocket_outline = [
+            pocket_up_inner,
+            pocket_up_outer,
+            pocket_down_outer,
+            pocket_mid_down,
+            pocket_down_inner,
+            pocket_up_inner
+        ]
+
+        return BackPocketPoints(
+            pocket_mid_up=pocket_mid_up,
+            pocket_mid_down=pocket_mid_down,
+            pocket_up_inner=pocket_up_inner,
+            pocket_up_outer=pocket_up_outer,
+            pocket_down_inner=pocket_down_inner,
+            pocket_down_outer=pocket_down_outer,
+            pocket_outline=pocket_outline
         )

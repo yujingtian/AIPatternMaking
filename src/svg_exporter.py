@@ -79,6 +79,12 @@ class SVGExporter:
             if back_points.waistband is not None:
                 for (sx, sy) in back_points.waistband.lower_waist_curve:
                     all_points.append((sx + back_offset_x, sy))
+            if back_points.jitou is not None:
+                all_points.append((back_points.jitou.jitou_outer[0] + back_offset_x, back_points.jitou.jitou_outer[1]))
+                all_points.append((back_points.jitou.jitou_inner[0] + back_offset_x, back_points.jitou.jitou_inner[1]))
+            if back_points.back_pocket is not None:
+                for (x, y) in back_points.back_pocket.pocket_outline:
+                    all_points.append((x + back_offset_x, y))
 
         # 计算原始版型坐标的边界
         xs = [p[0] for p in all_points]
@@ -240,6 +246,39 @@ class SVGExporter:
                 lines.append(f'  <circle cx="{mp[0]:.2f}" cy="{mp[1]:.2f}" r="4" fill="#16a085"/>')
                 label_pos = to_svg(pt[0] + offset_x + 1.5, pt[1] - 1.5)
                 lines.append(f'  <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="10" fill="#16a085">{label_text}</text>')
+
+        # ===== 步骤11: 绘制机头 =====
+        jt = back_points.jitou
+        if jt is not None:
+            # 绘制机头连接线
+            jt_line = [jt.jitou_outer, jt.jitou_inner]
+            jt_pts = ' '.join(f'{to_svg(x + offset_x, y)[0]:.2f},{to_svg(x + offset_x, y)[1]:.2f}' for x, y in jt_line)
+            lines.append(f'  <!-- 后片机头线 -->')
+            lines.append(f'  <polyline points="{jt_pts}" fill="none" stroke="#e67e22" stroke-width="3"/>')
+
+            # 标注机头的关键端点
+            for pt, label_text in [(jt.jitou_outer, "机头外"), (jt.jitou_inner, "机头内")]:
+                mp = to_svg(pt[0] + offset_x, pt[1])
+                lines.append(f'  <circle cx="{mp[0]:.2f}" cy="{mp[1]:.2f}" r="4" fill="#e67e22"/>')
+                label_pos = to_svg(pt[0] + offset_x + 1.5, pt[1] - 1.5)
+                lines.append(f'  <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="10" fill="#e67e22">{label_text}</text>')
+
+        # ===== 步骤12: 绘制后口袋 =====
+        bp = back_points.back_pocket
+        if bp is not None:
+            # 绘制后口袋轮廓
+            pocket_pts = ' '.join(f'{to_svg(x + offset_x, y)[0]:.2f},{to_svg(x + offset_x, y)[1]:.2f}' for x, y in bp.pocket_outline)
+            lines.append(f'  <!-- 后片后口袋 -->')
+            lines.append(f'  <polygon points="{pocket_pts}" fill="#f1c40f" fill-opacity="0.2" stroke="none"/>')
+            lines.append(f'  <polyline points="{pocket_pts}" fill="none" stroke="#f39c12" stroke-width="3"/>')
+
+            # 标注后口袋的关键端点
+            for pt, label_text in [(bp.pocket_up_inner, "袋上内"), (bp.pocket_up_outer, "袋上外"),
+                                   (bp.pocket_down_inner, "袋下内"), (bp.pocket_down_outer, "袋下外")]:
+                mp = to_svg(pt[0] + offset_x, pt[1])
+                lines.append(f'  <circle cx="{mp[0]:.2f}" cy="{mp[1]:.2f}" r="3" fill="#f39c12"/>')
+                label_pos = to_svg(pt[0] + offset_x + 1.5, pt[1] - 1.5)
+                lines.append(f'  <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="9" fill="#f39c12">{label_text}</text>')
 
         def mark(p, color):
             mp = to_svg(p[0] + offset_x, p[1])
@@ -465,6 +504,8 @@ class SVGExporter:
         elements.append(f'  <g font-family="Arial, sans-serif" font-size="12">')
         legend_items = [
             ('后片腰头/下腰头', '#16a085', 'line'),
+            ('后片机头线', '#e67e22', 'line'),
+            ('后片后口袋', '#f39c12', 'line'),
             ('后片外/内缝', '#2c3e50', 'line'),
             ('后浪/困势线', '#2980b9', 'line'),
             ('前片轮廓线', '#2c3e50', 'line'),

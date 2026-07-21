@@ -131,6 +131,27 @@ class BackWaistbandPoints:
     lower_waist_curve: List[Tuple[float, float]]  # 下腰头曲线采样点
 # =================================================================
 
+# ==================== 新增：后片机头数据类型 ====================
+@dataclass
+class BackJitouPoints:
+    """后片机头关键点（步骤11）"""
+    jitou_inner: Tuple[float, float]  # 机头内缝顶点（从下腰头内端点沿后浪向下7cm）
+    jitou_outer: Tuple[float, float]  # 机头外缝顶点（从下腰头外端点沿外缝向下3.5cm）
+# =================================================================
+
+# ==================== 新增：后片后口袋数据类型 ====================
+@dataclass
+class BackPocketPoints:
+    """后片后口袋关键点（步骤12）"""
+    pocket_mid_up: Tuple[float, float]  # 后口袋上中点
+    pocket_mid_down: Tuple[float, float]  # 后口袋下中点
+    pocket_up_inner: Tuple[float, float]  # 后口袋上内端点
+    pocket_up_outer: Tuple[float, float]  # 后口袋上外端点
+    pocket_down_inner: Tuple[float, float]  # 后口袋下内端点（最终）
+    pocket_down_outer: Tuple[float, float]  # 后口袋下外端点（最终）
+    pocket_outline: List[Tuple[float, float]]  # 后口袋轮廓点
+# =================================================================
+
 
 @dataclass
 class BackPatternPoints:
@@ -148,6 +169,10 @@ class BackPatternPoints:
     
     # ==================== 新增：腰头结果字段 ====================
     waistband: Optional['BackWaistbandPoints'] = None  # 步骤10 后片腰头 (设为Optional防报错)
+    # ==================== 新增：机头结果字段 ====================
+    jitou: Optional['BackJitouPoints'] = None  # 步骤11 后片机头 (设为Optional防报错)
+    # ==================== 新增：后口袋结果字段 ====================
+    back_pocket: Optional['BackPocketPoints'] = None  # 步骤12 后片后口袋 (设为Optional防报错)
     # =================================================================
 
 

@@ -94,6 +94,20 @@ def print_back_points_info(points: BackPatternPoints) -> None:
     print(f"  下腰内顶点:     ({wb.lower_waist_inner[0]:.2f}, {wb.lower_waist_inner[1]:.2f})")
     print(f"  下腰头曲线采样点数: {len(wb.lower_waist_curve)}")
 
+    print(f"\n【后片机头】")
+    jt = points.jitou
+    print(f"  机头外顶点:     ({jt.jitou_outer[0]:.2f}, {jt.jitou_outer[1]:.2f})")
+    print(f"  机头内顶点:     ({jt.jitou_inner[0]:.2f}, {jt.jitou_inner[1]:.2f})")
+
+    print(f"\n【后片后口袋】")
+    bp = points.back_pocket
+    print(f"  袋上中点:      ({bp.pocket_mid_up[0]:.2f}, {bp.pocket_mid_up[1]:.2f})")
+    print(f"  袋下中点:      ({bp.pocket_mid_down[0]:.2f}, {bp.pocket_mid_down[1]:.2f})")
+    print(f"  袋上内端点:    ({bp.pocket_up_inner[0]:.2f}, {bp.pocket_up_inner[1]:.2f})")
+    print(f"  袋上外端点:    ({bp.pocket_up_outer[0]:.2f}, {bp.pocket_up_outer[1]:.2f})")
+    print(f"  袋下内端点:    ({bp.pocket_down_inner[0]:.2f}, {bp.pocket_down_inner[1]:.2f})")
+    print(f"  袋下外端点:    ({bp.pocket_down_outer[0]:.2f}, {bp.pocket_down_outer[1]:.2f})")
+
     print("\n" + "="*60)
 
 

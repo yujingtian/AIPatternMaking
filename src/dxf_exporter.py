@@ -82,6 +82,10 @@ class DXFExporter:
         doc.layers.add(name='BACKDART', color=6)
         # 后片折叠腰头层 - 青色
         doc.layers.add(name='BACKWAISTBAND', color=4)
+        # 后片机头层 - 橙色
+        doc.layers.add(name='BACKJITOU', color=30)
+        # 后片后口袋层 - 橙色
+        doc.layers.add(name='BACKPOCKET', color=30)
         # 轮廓线层 - 白色/黑色
         doc.layers.add(name='OUTLINE', color=7)
         # 腰头层 - 橙色
@@ -231,6 +235,20 @@ class DXFExporter:
             piece = [wb.waist_outer, wb.waist_inner] + list(reversed(wb.lower_waist_curve))
             msp.add_lwpolyline([pt(p) for p in piece], close=True,
                                dxfattribs={'layer': 'BACKWAISTBAND'})
+
+        # 步骤11: 绘制机头
+        jt = back_points.jitou
+        if jt is not None:
+            # 机头连接线（从外到内）
+            msp.add_line(pt(jt.jitou_outer), pt(jt.jitou_inner),
+                        dxfattribs={'layer': 'BACKJITOU'})
+
+        # 步骤12: 绘制后口袋
+        bp = back_points.back_pocket
+        if bp is not None:
+            # 后口袋轮廓
+            msp.add_lwpolyline([pt(p) for p in bp.pocket_outline], close=True,
+                              dxfattribs={'layer': 'BACKPOCKET'})
 
     def _draw_outline(self, msp: Modelspace, points: PatternPoints) -> None:
         """绘制轮廓线"""
