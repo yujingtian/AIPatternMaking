@@ -133,8 +133,8 @@ class BackPanelCalculator:
 
     def _calculate_back_waist(self, bbox: BoundingBox) -> BackWaistPoints:
         """步骤2: 确定后腰头线宽度 (Back Waistband Width)"""
-        waist_inset = 1.0  # 后腰围外缝沿腰围线向内收1cm
-        # 后腰围外缝顶点: 大矩形腰围外缝角向内收1cm
+        waist_inset = 0.5  # 后腰围外缝沿腰围线向内收0.5cm
+        # 后腰围外缝顶点: 大矩形腰围外缝角向内收0.5cm
         back_waist_outer = (bbox.outer_seam_x + waist_inset, bbox.waist_y)
 
         # 后腰围宽度: 腰围/4 + 0.3松量 + 2省道 = 17.5 + 0.3 + 2 = 19.8
@@ -150,10 +150,10 @@ class BackPanelCalculator:
 
     def _calculate_back_crotch(self, bbox: BoundingBox) -> BackCrotchPoints:
         """步骤3: 确定后立裆宽和落档 (Back Crotch Width & Crotch Drop)"""
-        # 后立裆宽: 臀围 × 0.095 ≈ 8.5cm（文档示例取 8.5）
-        back_crotch_width = self.params.hip * 0.095
+        # 后立裆宽: 臀围 × 0.1 = 9cm（文档示例取 9）
+        back_crotch_width = self.params.hip * 0.1
         if abs(self.params.hip - 90.0) < 0.01:
-            back_crotch_width = 8.5  # 文档示例值
+            back_crotch_width = 9.0  # 文档示例值
 
         # 立裆延伸点: 立裆内缝交点沿立裆线向右延伸后立裆宽
         crotch_extend_point = (bbox.inner_seam_x + back_crotch_width, bbox.crotch_y)
@@ -564,8 +564,9 @@ class BackPanelCalculator:
         jitou_uy = jitou_dy / jitou_L
 
         # 垂直于机头线，向下方向的向量
-        jitou_perp_ux = -jitou_uy
-        jitou_perp_uy = jitou_ux
+        # 顺时针旋转90度：(ux, uy) → (uy, -ux)
+        jitou_perp_ux = jitou_uy
+        jitou_perp_uy = -jitou_ux
 
         # 取机头线中点向下平移2.5cm
         jitou_mid = (
