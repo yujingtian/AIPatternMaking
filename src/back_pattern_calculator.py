@@ -88,6 +88,11 @@ class BackPanelCalculator:
             waist_final, crotch, rise, seam, knee_hem, jitou
         )
 
+        # 裁片拆分: 后腰头裁片（闭合，腰省已拼合）
+        back_waistband_outline = self._calculate_back_waistband_outline(
+            waist_final, dart, band_width=4.0
+        )
+
         self.points = BackPatternPoints(
             params=self.params,
             bounding_box=bounding_box,
@@ -102,7 +107,8 @@ class BackPanelCalculator:
             waistband=waistband,
             jitou=jitou,
             back_pocket=back_pocket,
-            back_panel_outline=back_panel_outline
+            back_panel_outline=back_panel_outline,
+            back_waistband_outline=back_waistband_outline
         )
         return self.points
 
@@ -182,6 +188,77 @@ class BackPanelCalculator:
             full_outer, knee_hem.hem_outer, jitou.jitou_outer
         )
         outline.extend(outer_seg[1:])
+        return outline
+
+    def _calculate_back_waistband_outline(self, waist_final: BackWaistFinalPoints,
+                                          dart: BackDartPoints,
+                                          band_width: float = 4.0) -> List[Tuple[float, float]]:
+        """裁片拆分: 后腰头裁片（闭合，腰省已拼合）
+        1. 省道拼合（刚体变换）：以省尖为旋转基点，旋转内缝侧部分，
+           使上腰头的省内端点与省外端点重合（旋转角度 = 省尖处两省边线夹角）。
+        2. 上腰头轮廓（两边直线 + 中间弧线）：
+           - 两端各取 3cm 直线段（外缝侧自上腰头外缝顶点、内缝侧自拼合后的上腰头内缝顶点）；
+           - 中间用三次贝塞尔弧线连接两直线端点，两个控制点同取两直线所在直线的交点
+             （省拼合点）：两端与直线段精确相切，弧度向内（凹向腰头内部）、
+             弧顶微微高于拼合后的省内/外端点（约 0.1cm）。
+        3. 下腰头轮廓：上腰头轮廓沿法线向腰头内部平行偏移 4cm（处处 4cm 间距，弧线一致）。
+        4. 闭合轮廓：上腰头(外→内) + 内缝侧边 + 下腰头(内→外) + 外缝侧边。
+        """
+        W_out = waist_final.new_waist_outer    # 上腰头外缝顶点
+        W_in = waist_final.new_waist_inner     # 上腰头内缝顶点
+        tip = dart.dart_tip                    # 省尖（旋转基点）
+        dart_outer = dart.dart_outer           # 省外端点
+        dart_inner = dart.dart_inner           # 省内端点
+
+        # ----- 1. 省道拼合：绕省尖旋转，省内端点 → 省外端点 -----
+        v1 = (dart_inner[0] - tip[0], dart_inner[1] - tip[1])
+        v2 = (dart_outer[0] - tip[0], dart_outer[1] - tip[1])
+        theta = math.atan2(v1[0] * v2[1] - v1[1] * v2[0],
+                           v1[0] * v2[0] + v1[1] * v2[1])
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+        def T(p: Tuple[float, float]) -> Tuple[float, float]:
+            dx, dy = p[0] - tip[0], p[1] - tip[1]
+            return (tip[0] + dx * cos_t - dy * sin_t,
+                    tip[1] + dx * sin_t + dy * cos_t)
+
+        W_in_t = T(W_in)                       # 拼合后的上腰头内缝顶点
+
+        # ----- 2. 上腰头轮廓：两边各 3cm 直线 + 中间相切弧线 -----
+        d1 = (dart_outer[0] - W_out[0], dart_outer[1] - W_out[1])
+        n1 = math.hypot(*d1)
+        d1 = (d1[0] / n1, d1[1] / n1)          # 外缝侧直线方向
+        d2 = (W_in_t[0] - dart_outer[0], W_in_t[1] - dart_outer[1])
+        n2 = math.hypot(*d2)
+        d2 = (d2[0] / n2, d2[1] / n2)          # 内缝侧直线方向（拼合后）
+
+        straight = 3.0
+        p_out = (W_out[0] + straight * d1[0], W_out[1] + straight * d1[1])
+        p_in = (W_in_t[0] - straight * d2[0], W_in_t[1] - straight * d2[1])
+
+        # 控制点：两直线所在直线的交点（即省拼合点）。两个控制点同取该点时，
+        # 弧线两端与直线段精确相切，且弧顶沿外法线微微高出拼合点（约 0.1cm）
+        corner = self._line_intersect(p_out, d1, p_in, d2)
+        if corner is None:
+            corner = dart_outer
+        arc = sample_bezier_curve([p_out, corner, corner, p_in], samples=30)
+        top_edge = [W_out, p_out] + arc[1:] + [W_in_t]
+
+        # ----- 3. 下腰头轮廓：上腰头沿法线向腰头内部平行偏移 4cm -----
+        bottom_edge = []
+        for i, p in enumerate(top_edge):
+            a = top_edge[i - 1] if i > 0 else p
+            b = top_edge[i + 1] if i < len(top_edge) - 1 else p
+            tx, ty = b[0] - a[0], b[1] - a[1]
+            nt = math.hypot(tx, ty) or 1.0
+            nx, ny = ty / nt, -tx / nt
+            # 统一指向腰头内部（省尖一侧）
+            if (tip[0] - p[0]) * nx + (tip[1] - p[1]) * ny < 0:
+                nx, ny = -nx, -ny
+            bottom_edge.append((p[0] + band_width * nx, p[1] + band_width * ny))
+
+        # ----- 4. 闭合轮廓：上腰头(外→内) + 内缝侧边 + 下腰头(内→外) + 外缝侧边 -----
+        outline = top_edge + list(reversed(bottom_edge))
         return outline
 
     def _calculate_bounding_box(self) -> BoundingBox:
