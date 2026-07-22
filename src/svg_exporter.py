@@ -86,6 +86,15 @@ class SVGExporter:
                 for (x, y) in back_points.back_pocket.pocket_outline:
                     all_points.append((x + back_offset_x, y))
 
+        # 门襟裁片整体沿Y负向偏移，放在前片下方单独展示
+        fly_panel_offset_y = 0.0
+        if (hasattr(points, 'front_fly') and
+                getattr(points.front_fly, 'fly_panel_outline', None)):
+            panel_max_y = max(p[1] for p in points.front_fly.fly_panel_outline)
+            fly_panel_offset_y = -(panel_max_y + 5.0)  # 裁片最高点位于脚口线下方5cm
+            for (fx, fy) in points.front_fly.fly_panel_outline:
+                all_points.append((fx, fy + fly_panel_offset_y))
+
         # 计算原始版型坐标的边界
         xs = [p[0] for p in all_points]
         ys = [p[1] for p in all_points]
@@ -127,6 +136,7 @@ class SVGExporter:
         if back_points is not None:
             svg_content.extend(self._draw_back_panel(back_points, back_offset_x, to_svg))
         svg_content.extend(self._draw_outline(points, to_svg))
+        svg_content.extend(self._draw_fly_panel(points, to_svg, fly_panel_offset_y))
         svg_content.extend(self._draw_points(points, to_svg))
         if include_dimensions:
             svg_content.extend(self._draw_dimensions(points, to_svg, min_x, max_x, min_y, max_y))
@@ -363,6 +373,26 @@ class SVGExporter:
         fly_svg_points = [to_svg(x, y) for x, y in fly.fly_curve]
         fly_points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in fly_svg_points])
         elements.append(f'    <polyline points="{fly_points_str}" fill="none" stroke="#27ae60" stroke-width="3"/>')
+        return elements
+
+    def _draw_fly_panel(self, points: PatternPoints, to_svg,
+                        offset_y: float) -> List[str]:
+        """单独绘制门襟裁片（闭合轮廓，平移到前片下方）"""
+        elements = []
+        fly = getattr(points, 'front_fly', None)
+        outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+        if not outline:
+            return elements
+        elements.append(f'  <!-- 门襟裁片（单独裁片） -->')
+        panel_svg_points = [to_svg(x, y + offset_y) for x, y in outline]
+        points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
+        elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#27ae60" stroke-width="3"/>')
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline) + offset_y
+        label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
+        elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#27ae60" font-weight="bold">门襟裁片</text>')
         return elements
 
     def _draw_crescent_pocket(self, points: PatternPoints, to_svg) -> List[str]:

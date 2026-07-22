@@ -78,6 +78,8 @@ def print_points_info(points: PatternPoints) -> None:
         print(f"  门襟内端点:     ({ff.fly_inner_end[0]:.2f}, {ff.fly_inner_end[1]:.2f})")
         print(f"  门襟外端点:     ({ff.fly_outer_end[0]:.2f}, {ff.fly_outer_end[1]:.2f})")
         print(f"  门襟弧终点:     ({ff.fly_end_point[0]:.2f}, {ff.fly_end_point[1]:.2f})")
+        if getattr(ff, 'fly_panel_outline', None):
+            print(f"  门襟裁片轮廓:   {len(ff.fly_panel_outline)} 个采样点（单独绘制于前片下方）")
 
     # 月牙袋信息
     if hasattr(points, 'crescent_pocket'):

@@ -53,6 +53,9 @@ class DXFExporter:
         # 绘制轮廓线
         self._draw_outline(msp, points)
 
+        # 单独绘制门襟裁片（闭合轮廓，平移到前片下方）
+        self._draw_fly_panel(msp, points)
+
         # 绘制关键点标注
         self._draw_points(msp, points)
 
@@ -92,6 +95,8 @@ class DXFExporter:
         doc.layers.add(name='WAISTBAND', color=1)
         # 前门襟层 - 绿色
         doc.layers.add(name='FRONTFLY', color=3)
+        # 门襟裁片层 - 绿色
+        doc.layers.add(name='FLYPANEL', color=3)
         # 月牙袋层 - 紫色
         doc.layers.add(name='POCKET', color=6)
         # 袋贴层 - 黄色
@@ -551,6 +556,24 @@ class DXFExporter:
         dxf_fly_points = [self._to_dxf_coords(x, y) for x, y in fly_outline]
         msp.add_lwpolyline(dxf_fly_points, close=True, dxfattribs={'layer': 'FRONTFLY'})
 
+    def _draw_fly_panel(self, msp: Modelspace, points: PatternPoints) -> None:
+        """单独绘制门襟裁片（闭合轮廓，平移到前片下方）"""
+        fly = getattr(points, 'front_fly', None)
+        outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+        if not outline:
+            return
+        # 裁片最高点平移到脚口参考线下方5cm处
+        panel_max_y = max(p[1] for p in outline)
+        offset_y = -(panel_max_y + 5.0)
+        dxf_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'FLYPANEL'})
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        label_x, label_y = self._to_dxf_coords((min_px + max_px) / 2, -3.5)
+        text = msp.add_text('FLY_PANEL', dxfattribs={'layer': 'FLYPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
     def _draw_crescent_pocket(self, msp: Modelspace, points: PatternPoints) -> None:
         """绘制月牙袋"""
         pocket = points.crescent_pocket
@@ -744,6 +767,14 @@ class SimpleDXFExporter:
 
             dxf_fly_points = [(x * self.scale, y * self.scale) for x, y in fly_outline]
             msp.add_lwpolyline(dxf_fly_points, close=True)
+
+            # 门襟裁片单独平移到前片下方
+            panel_outline = getattr(fly, 'fly_panel_outline', None)
+            if panel_outline:
+                panel_max_y = max(p[1] for p in panel_outline)
+                offset_y = -(panel_max_y + 5.0)
+                dxf_panel_points = [(x * self.scale, (y + offset_y) * self.scale) for x, y in panel_outline]
+                msp.add_lwpolyline(dxf_panel_points, close=True)
 
         # 如果有月牙袋，也添加月牙袋轮廓
         if hasattr(points, 'crescent_pocket'):

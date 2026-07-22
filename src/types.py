@@ -198,6 +198,7 @@ class FrontFlyPoints:
     fly_outer_end: Tuple[float, float]      # 门襟外端点（与前浪交叉点）
     fly_end_point: Tuple[float, float]      # 门襟弧线终点（门襟线上离门襟内端点往上3cm）
     fly_curve: List[Tuple[float, float]]    # 门襟弧线
+    fly_panel_outline: List[Tuple[float, float]] = None  # 门襟裁片闭合轮廓（单独裁片）
 
 
 @dataclass

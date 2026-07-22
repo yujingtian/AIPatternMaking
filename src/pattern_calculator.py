@@ -771,12 +771,29 @@ class JeansPatternCalculator:
             fly_outer_end, fly_start_point, fly_inner_end, rise_dir
         )
 
+        # 6. 构建门襟裁片闭合轮廓：
+        # 门襟起点 → 门襟弧终点（门襟线直线段）→ 门襟弧线 → 门襟外端点
+        # → 沿前浪向上至下腰头内端点 → 沿下腰头回到门襟起点
+        rise_segment = self._extract_curve_segment_exact(
+            front_rise_curve, fly_outer_end, waistband.lower_waist_inner
+        )
+        waist_segment = self._extract_curve_segment_exact(
+            lower_waistline_curve, waistband.lower_waist_inner, fly_start_point
+        )
+        fly_panel_outline = [fly_start_point, fly_end_point]
+        fly_panel_outline.extend(fly_curve[1:])
+        fly_panel_outline.extend(rise_segment[1:])
+        # 精确补上下腰头内端点角点（两段采样曲线的最近点可能与真实角点有偏差）
+        fly_panel_outline.append(waistband.lower_waist_inner)
+        fly_panel_outline.extend(waist_segment[1:])
+
         return FrontFlyPoints(
             fly_start_point=fly_start_point,
             fly_inner_end=fly_inner_end,
             fly_outer_end=fly_outer_end,
             fly_end_point=fly_end_point,
-            fly_curve=fly_curve
+            fly_curve=fly_curve,
+            fly_panel_outline=fly_panel_outline
         )
 
     def _get_crescent_pocket_controls(self, p0: Tuple[float, float],
@@ -1062,6 +1079,43 @@ class JeansPatternCalculator:
             return curve[i1:i2 + 1]
         else:
             return list(reversed(curve[i2:i1 + 1]))
+
+    def _project_point_on_curve(self, curve: List[Tuple[float, float]],
+                                 p: Tuple[float, float]):
+        """将点投影到折线曲线上，返回 (距离, 线段索引, 线段参数t, 投影点)"""
+        best = None
+        for i in range(len(curve) - 1):
+            ax, ay = curve[i]
+            bx, by = curve[i + 1]
+            dx, dy = bx - ax, by - ay
+            len2 = dx * dx + dy * dy
+            t = 0.0 if len2 < 1e-12 else ((p[0] - ax) * dx + (p[1] - ay) * dy) / len2
+            t = max(0.0, min(1.0, t))
+            q = (ax + t * dx, ay + t * dy)
+            d = point_distance(p, q)
+            if best is None or d < best[0]:
+                best = (d, i, t, q)
+        return best
+
+    def _extract_curve_segment_exact(self, curve: List[Tuple[float, float]],
+                                      p_start: Tuple[float, float],
+                                      p_end: Tuple[float, float]) -> List[Tuple[float, float]]:
+        """精确提取曲线上从 p_start 到 p_end 之间的曲线段（端点按投影精确切断，
+        不会像最近采样点法那样越过端点）"""
+        _, i1, t1, q1 = self._project_point_on_curve(curve, p_start)
+        _, i2, t2, q2 = self._project_point_on_curve(curve, p_end)
+        s1, s2 = i1 + t1, i2 + t2
+        if s1 <= s2:
+            pts = [q1]
+            for i in range(i1 + 1, i2 + 1):
+                pts.append(curve[i])
+            pts.append(q2)
+        else:
+            pts = [q1]
+            for i in range(i1, i2, -1):
+                pts.append(curve[i])
+            pts.append(q2)
+        return pts
 
     def _calculate_pocket_bag(self, pocket_patch: PocketPatchPoints,
                                bbox: BoundingBox, waistband: WaistbandPoints,
