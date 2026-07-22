@@ -197,6 +197,11 @@ class JeansPatternCalculator:
         # 裁片拆分: 小表袋裁片
         watch_pocket_outline = self._calculate_watch_pocket_outline(watch_pocket)
 
+        # 裁片拆分: 袋布裁片（沿袋布线镜像）
+        pocket_bag_outline, pocket_bag_fold_line = self._calculate_pocket_bag_outline(
+            pocket_bag
+        )
+
         # 组装所有点
         self.points = PatternPoints(
             params=self.params,
@@ -219,7 +224,9 @@ class JeansPatternCalculator:
             front_panel_outline=front_panel_outline,
             front_waistband_outline=front_waistband_outline,
             pocket_patch_outline=pocket_patch_outline,
-            watch_pocket_outline=watch_pocket_outline
+            watch_pocket_outline=watch_pocket_outline,
+            pocket_bag_outline=pocket_bag_outline,
+            pocket_bag_fold_line=pocket_bag_fold_line
         )
 
         return self.points
@@ -1001,6 +1008,48 @@ class JeansPatternCalculator:
         outline.extend(wp.bottom_curve[1:])            # 3. 底边（下内 → 下外，沿袋贴弧线）
         outline.extend(reversed(wp.outer_line[:-1]))   # 4. 外线（下外 → 上外），闭合
         return outline
+
+    def _mirror_point_across_line(self, p: Tuple[float, float],
+                                   a: Tuple[float, float],
+                                   d: Tuple[float, float]) -> Tuple[float, float]:
+        """将点 p 关于过点 a、方向为 d（单位向量）的直线做镜像"""
+        vx, vy = p[0] - a[0], p[1] - a[1]
+        t = vx * d[0] + vy * d[1]
+        return (a[0] + 2 * t * d[0] - vx,
+                a[1] + 2 * t * d[1] - vy)
+
+    def _calculate_pocket_bag_outline(self, pocket_bag: PocketBagPoints):
+        """裁片拆分: 袋布裁片（闭合，沿袋布线镜像的完整袋布）
+        一半轮廓（从袋布上腰头顶点出发）：
+        1. 顶边：袋布上腰头顶点 → 沿下腰头线 → 下腰头外缝顶点 → 沿外侧缝 → 袋布外缝顶点
+        2. 袋布弧线：袋布外缝顶点 → 袋布拐点
+        3. 底边：袋布拐点 → 袋布内端点
+        再以袋布线（袋布上腰头顶点 → 袋布内端点）为对称轴镜像另一半，
+        两半端点都在对称轴上，拼成完整的闭合袋布裁片。
+        返回 (完整闭合轮廓, 对称轴袋布线)
+        """
+        bag = pocket_bag
+        # 对称轴：袋布线（袋布上腰头顶点 → 袋布内端点）
+        a = bag.bag_upper_waist
+        dx = bag.bag_inner_end[0] - a[0]
+        dy = bag.bag_inner_end[1] - a[1]
+        axis_len = math.hypot(dx, dy)
+        d = (dx / axis_len, dy / axis_len)
+
+        # 一半轮廓：顶边（反向）→ 袋布弧线（反向）→ 底边（反向）
+        half = []
+        half.extend(reversed(bag.bag_top_edge))       # 上腰头顶点 → 外缝顶点
+        half.extend(reversed(bag.bag_curve[:-1]))     # 外缝顶点 → 拐点
+        half.extend(reversed(bag.bag_bottom_edge[:-1]))  # 拐点 → 内端点
+        # 起点强制为精确的袋布上腰头顶点（bag_top_edge末端为最近采样点，有偏差）
+        half[0] = bag.bag_upper_waist
+        # 镜像另一半（首尾端点在对称轴上，镜像后保持不变）
+        mirrored = [self._mirror_point_across_line(p, a, d) for p in reversed(half)]
+        full_outline = half + mirrored[1:]
+
+        # 对称轴（袋布线）
+        fold_line = list(bag.bag_line)
+        return full_outline, fold_line
 
     def _get_crescent_pocket_controls(self, p0: Tuple[float, float],
                                       p1: Tuple[float, float],

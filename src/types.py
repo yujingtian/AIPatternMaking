@@ -307,3 +307,8 @@ class PatternPoints:
 
     # 小表袋裁片（裁片拆分，闭合轮廓）
     watch_pocket_outline: Optional[List[Tuple[float, float]]] = None
+
+    # 袋布裁片（裁片拆分，闭合轮廓，沿袋布线镜像的完整袋布）
+    pocket_bag_outline: Optional[List[Tuple[float, float]]] = None
+    # 袋布裁片的对称轴（袋布线：袋布上腰头顶点 → 袋布内端点）
+    pocket_bag_fold_line: Optional[List[Tuple[float, float]]] = None
