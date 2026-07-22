@@ -140,6 +140,18 @@ class SVGExporter:
             for (fx, fy) in points.pocket_bag_outline:
                 all_points.append((fx, fy + bag_panel_offset_y))
 
+        # 后片裁片平移到所有图形最右侧单独展示
+        back_panel_offset_x = 0.0
+        if back_points is not None and getattr(back_points, 'back_panel_outline', None):
+            panel_min_x = min(p[0] for p in back_points.back_panel_outline)
+            right_edge = max(p[0] for p in all_points)
+            back_panel_offset_x = right_edge + 8.0 - panel_min_x  # 与左侧图形间隔8cm
+            for (fx, fy) in back_points.back_panel_outline:
+                all_points.append((fx + back_panel_offset_x, fy))
+            if back_points.back_pocket is not None:
+                for (fx, fy) in back_points.back_pocket.pocket_outline:
+                    all_points.append((fx + back_panel_offset_x, fy))
+
         # 计算原始版型坐标的边界
         xs = [p[0] for p in all_points]
         ys = [p[1] for p in all_points]
@@ -187,6 +199,8 @@ class SVGExporter:
         svg_content.extend(self._draw_pocket_patch_panel(points, to_svg, patch_panel_offset_y))
         svg_content.extend(self._draw_watch_pocket_panel(points, to_svg, wp_panel_offset_y))
         svg_content.extend(self._draw_pocket_bag_panel(points, to_svg, bag_panel_offset_y))
+        if back_points is not None:
+            svg_content.extend(self._draw_back_panel_piece(back_points, to_svg, back_panel_offset_x))
         svg_content.extend(self._draw_points(points, to_svg))
         if include_dimensions:
             svg_content.extend(self._draw_dimensions(points, to_svg, min_x, max_x, min_y, max_y))
@@ -219,6 +233,33 @@ class SVGExporter:
             lines.append(f'    <line x1="{start[0]:.2f}" y1="{start[1]:.2f}" x2="{end[0]:.2f}" y2="{end[1]:.2f}"/>')
         lines.append(f'  </g>')
         return lines
+
+    def _draw_back_panel_piece(self, back_points: BackPatternPoints, to_svg,
+                               offset_x: float) -> List[str]:
+        """单独绘制后片整体轮廓（闭合裁片，平移到所有图形最右侧）
+        裁片上同时绘制后口袋轮廓作为对位线。"""
+        elements = []
+        outline = getattr(back_points, 'back_panel_outline', None)
+        if not outline:
+            return elements
+        elements.append(f'  <!-- 后片整体轮廓（单独裁片） -->')
+        panel_svg_points = [to_svg(x + offset_x, y) for x, y in outline]
+        points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
+        elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#2c3e50" stroke-width="3"/>')
+        # 裁片上的后口袋轮廓（对位线）
+        bp = back_points.back_pocket
+        if bp is not None:
+            elements.append(f'  <!-- 后片裁片上的后口袋 -->')
+            pocket_svg_points = [to_svg(x + offset_x, y) for x, y in bp.pocket_outline]
+            pocket_points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in pocket_svg_points])
+            elements.append(f'    <polygon points="{pocket_points_str}" fill="none" stroke="#f39c12" stroke-width="2.5"/>')
+        # 裁片标注
+        min_px = min(p[0] for p in outline) + offset_x
+        max_px = max(p[0] for p in outline) + offset_x
+        max_py = max(p[1] for p in outline)
+        label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
+        elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#2c3e50" font-weight="bold">后片</text>')
+        return elements
 
     def _draw_back_panel(self, back_points: BackPatternPoints, offset_x: float, to_svg) -> List[str]:
         bbox = back_points.bounding_box
@@ -725,6 +766,7 @@ class SVGExporter:
         elements.append(f'  <!-- 图例 -->')
         elements.append(f'  <g font-family="Arial, sans-serif" font-size="12">')
         legend_items = [
+            ('后片裁片', '#2c3e50', 'line'),
             ('后片腰头/下腰头', '#16a085', 'line'),
             ('后片机头线', '#e67e22', 'line'),
             ('后片后口袋', '#f39c12', 'line'),

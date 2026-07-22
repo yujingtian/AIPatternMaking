@@ -71,6 +71,10 @@ class DXFExporter:
         # 单独绘制袋布裁片（闭合裁片，平移到小表袋裁片下方）
         self._draw_pocket_bag_panel(msp, points)
 
+        # 单独绘制后片整体轮廓（闭合裁片，平移到所有图形最右侧）
+        if back_points is not None:
+            self._draw_back_panel_piece(msp, points, back_points)
+
         # 绘制关键点标注
         self._draw_points(msp, points)
 
@@ -104,6 +108,8 @@ class DXFExporter:
         doc.layers.add(name='BACKJITOU', color=30)
         # 后片后口袋层 - 橙色
         doc.layers.add(name='BACKPOCKET', color=30)
+        # 后片裁片层 - 白/黑（主轮廓）
+        doc.layers.add(name='BACKPANELPIECE', color=7)
         # 轮廓线层 - 白色/黑色
         doc.layers.add(name='OUTLINE', color=7)
         # 腰头层 - 橙色
@@ -634,6 +640,44 @@ class DXFExporter:
         max_py = max(p[1] for p in outline)
         label_x, label_y = self._to_dxf_coords((panel_min_x + max_px) / 2 + offset_x, max_py + 1.5)
         text = msp.add_text('FRONT_PANEL', dxfattribs={'layer': 'FRONTPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
+    def _draw_back_panel_piece(self, msp: Modelspace, points: PatternPoints,
+                               back_points: BackPatternPoints) -> None:
+        """单独绘制后片整体轮廓（闭合裁片，平移到所有图形最右侧）
+        裁片上同时绘制后口袋轮廓作为对位线。"""
+        outline = getattr(back_points, 'back_panel_outline', None)
+        if not outline:
+            return
+        # 计算左侧已有图形的最右边缘（前片 → 后片 → 前片裁片）
+        front_max_x = points.front_rise.crotch_extension_point[0]
+        back_offset_x = front_max_x + 8.0
+        back_max_x = max(
+            back_points.bounding_box.inner_seam_x,
+            back_points.crotch.back_crotch_point[0],
+            back_points.waist_final.new_waist_inner[0],
+            back_points.knee_hem.hem_inner[0],
+        )
+        right_edge = back_offset_x + back_max_x
+        front_panel = getattr(points, 'front_panel_outline', None)
+        if front_panel:
+            fp_min_x = min(p[0] for p in front_panel)
+            fp_offset_x = right_edge + 8.0 - fp_min_x
+            right_edge = fp_offset_x + max(p[0] for p in front_panel)
+        panel_min_x = min(p[0] for p in outline)
+        offset_x = right_edge + 8.0 - panel_min_x  # 与左侧图形间隔8cm
+        dxf_pts = [self._to_dxf_coords(x + offset_x, y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'BACKPANELPIECE'})
+        # 裁片上的后口袋轮廓（对位线，pocket_outline 首尾已闭合）
+        bp = back_points.back_pocket
+        if bp is not None:
+            pocket_pts = [self._to_dxf_coords(x + offset_x, y) for x, y in bp.pocket_outline]
+            msp.add_lwpolyline(pocket_pts, dxfattribs={'layer': 'BACKPOCKET'})
+        # 裁片标注
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline)
+        label_x, label_y = self._to_dxf_coords((panel_min_x + max_px) / 2 + offset_x, max_py + 1.5)
+        text = msp.add_text('BACK_PANEL', dxfattribs={'layer': 'BACKPANELPIECE', 'height': 2.5 * self.scale})
         text.dxf.insert = (label_x, label_y)
 
     def _panel_stack_bottom_y(self, points: PatternPoints, level: int) -> float:

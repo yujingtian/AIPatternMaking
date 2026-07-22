@@ -83,6 +83,11 @@ class BackPanelCalculator:
             waist_final, dart, jitou
         )
 
+        # 裁片拆分: 后片整体轮廓（闭合）
+        back_panel_outline = self._calculate_back_panel_outline(
+            waist_final, crotch, rise, seam, knee_hem, jitou
+        )
+
         self.points = BackPatternPoints(
             params=self.params,
             bounding_box=bounding_box,
@@ -96,9 +101,88 @@ class BackPanelCalculator:
             dart=dart,
             waistband=waistband,
             jitou=jitou,
-            back_pocket=back_pocket
+            back_pocket=back_pocket,
+            back_panel_outline=back_panel_outline
         )
         return self.points
+
+    def _project_point_on_curve(self, curve: List[Tuple[float, float]],
+                                 p: Tuple[float, float]):
+        """将点投影到折线曲线上，返回 (距离, 线段索引, 线段参数t, 投影点)"""
+        best = None
+        for i in range(len(curve) - 1):
+            ax, ay = curve[i]
+            bx, by = curve[i + 1]
+            dx, dy = bx - ax, by - ay
+            len2 = dx * dx + dy * dy
+            t = 0.0 if len2 < 1e-12 else ((p[0] - ax) * dx + (p[1] - ay) * dy) / len2
+            t = max(0.0, min(1.0, t))
+            q = (ax + t * dx, ay + t * dy)
+            d = point_distance(p, q)
+            if best is None or d < best[0]:
+                best = (d, i, t, q)
+        return best
+
+    def _extract_curve_segment_exact(self, curve: List[Tuple[float, float]],
+                                      p_start: Tuple[float, float],
+                                      p_end: Tuple[float, float]) -> List[Tuple[float, float]]:
+        """精确提取曲线上从 p_start 到 p_end 之间的曲线段（端点按投影精确切断，
+        不会像最近采样点法那样越过端点）"""
+        _, i1, t1, q1 = self._project_point_on_curve(curve, p_start)
+        _, i2, t2, q2 = self._project_point_on_curve(curve, p_end)
+        s1, s2 = i1 + t1, i2 + t2
+        if s1 <= s2:
+            pts = [q1]
+            for i in range(i1 + 1, i2 + 1):
+                pts.append(curve[i])
+            pts.append(q2)
+        else:
+            pts = [q1]
+            for i in range(i1, i2, -1):
+                pts.append(curve[i])
+            pts.append(q2)
+        return pts
+
+    def _calculate_back_panel_outline(self, waist_final: BackWaistFinalPoints,
+                                       crotch: BackCrotchPoints,
+                                       rise: BackRisePoints,
+                                       seam: BackSeamPoints,
+                                       knee_hem: KneeHemPoints,
+                                       jitou: BackJitouPoints) -> List[Tuple[float, float]]:
+        """裁片拆分: 后片整体轮廓（闭合）
+        从机头外缝顶点出发，依次为：
+        1. 机头线：机头外缝顶点 → 机头内缝顶点
+        2. 后浪段：机头内缝顶点 → 后立裆宽顶点（沿后浪曲线向下）
+        3. 内侧缝段：后立裆宽顶点 → 脚口内缝顶点（经后膝围内缝顶点）
+        4. 脚口线：脚口内缝顶点 → 脚口外缝顶点
+        5. 外侧缝段：脚口外缝顶点 → 机头外缝顶点（经后膝围外缝顶点、后臀围外缝顶点），闭合
+        """
+        outline = []
+        # 1. 机头线（机头外缝顶点 → 机头内缝顶点）
+        outline.append(jitou.jitou_outer)
+        outline.append(jitou.jitou_inner)
+        # 2. 后浪段（机头内缝顶点 → 后立裆宽顶点）
+        #    完整后浪路径 = [新腰围内缝顶点] + 后浪曲线（与机头计算时的取点路径一致）
+        full_rise = [waist_final.new_waist_inner] + rise.rise_curve
+        rise_seg = self._extract_curve_segment_exact(
+            full_rise, jitou.jitou_inner, crotch.back_crotch_point
+        )
+        outline.extend(rise_seg[1:])
+        # 3. 内侧缝段（后立裆宽顶点 → 脚口内缝顶点，inner_seam_curve 方向一致）
+        inner_seg = self._extract_curve_segment_exact(
+            seam.inner_seam_curve, crotch.back_crotch_point, knee_hem.hem_inner
+        )
+        outline.extend(inner_seg[1:])
+        # 4. 脚口线（脚口内缝顶点 → 脚口外缝顶点）
+        outline.append(knee_hem.hem_outer)
+        # 5. 外侧缝段（脚口外缝顶点 → 机头外缝顶点）
+        #    完整外缝路径 = [新腰围外缝顶点] + 外缝曲线（与机头计算时的取点路径一致）
+        full_outer = [waist_final.new_waist_outer] + seam.outer_seam_curve
+        outer_seg = self._extract_curve_segment_exact(
+            full_outer, knee_hem.hem_outer, jitou.jitou_outer
+        )
+        outline.extend(outer_seg[1:])
+        return outline
 
     def _calculate_bounding_box(self) -> BoundingBox:
         """步骤1: 建立基础参考线与大矩形框架 (Reference Lines & Bounding Box)
@@ -284,16 +368,31 @@ class BackPanelCalculator:
         Hi = knee_hem.hem_inner                     # 脚口内缝顶点 (23.95, 0)
 
         # ===== 外缝 =====
-        # 上段 W→H：向外(X-)凸（二次贝塞尔）
-        cA = ((W[0] + H[0]) / 2 - 0.8, (W[1] + H[1]) / 2)
-        segA = sample_bezier_curve([W, cA, H], samples=15)
-        # 中段 H→K：先凸(X-)后凹(X+)的 S 型（三次贝塞尔带拐点）
+        # 关节切线方向（先定切线再构造各段，保证相邻段在交点处 G1 连续、无折角）
+        #   tW：上段起点切线（保持原方向不变，步骤8的腰围外缝延长线依赖它）
+        #   tH：臀围外缝顶点处切线（近竖直、微向外，外缝在最宽处圆顺过渡）
+        #   tK：膝围外缝顶点处切线（竖直，与下段平滑相接）
+        tW = (-1.05, -8.0)
+        nW = math.hypot(*tW)
+        tW = (tW[0] / nW, tW[1] / nW)
+        tH = (-0.10, -0.995)
+        nH = math.hypot(*tH)
+        tH = (tH[0] / nH, tH[1] / nH)
+        tK = (0.0, -1.0)
+
+        # 上段 W→H：三次贝塞尔，起点切线 tW、终点切线 tH，向外(X-)圆顺凸出
+        hA = point_distance(W, H) / 3.0
+        cA0 = (W[0] + hA * tW[0], W[1] + hA * tW[1])
+        cA1 = (H[0] - hA * tH[0], H[1] - hA * tH[1])
+        segA = sample_bezier_curve([W, cA0, cA1, H], samples=15)
+        # 中段 H→K：三次贝塞尔，起点切线 tH（与上段共享）、终点切线 tK
+        #   起手长柄沿 tH 向外(X-)凸出，回柄竖直收进 K → 先凸(X-)后凹(X+)的 S 型（带拐点）
         dyB = H[1] - K[1]
-        cB0 = (H[0] - 0.8, H[1] - dyB / 3.0)        # 靠近 H，向外凸
-        cB1 = (K[0] + 0.8, K[1] + dyB / 3.0)        # 靠近 K，向内凹
+        cB0 = (H[0] + dyB * 0.45 * tH[0], H[1] + dyB * 0.45 * tH[1])
+        cB1 = (K[0] - dyB * 0.40 * tK[0], K[1] - dyB * 0.40 * tK[1])
         segB = sample_bezier_curve([H, cB0, cB1, K], samples=20)
-        # 下段 K→He：向内(X+)微凹（二次贝塞尔）
-        cC = ((K[0] + He[0]) / 2 + 0.3, (K[1] + He[1]) / 2)
+        # 下段 K→He：二次贝塞尔，控制点在 K 正下方（起点切线严格竖直 = tK），向内(X+)微凹
+        cC = (K[0], (K[1] + He[1]) / 2.0)
         segC = sample_bezier_curve([K, cC, He], samples=15)
         outer_seam_curve = segA[:-1] + segB[:-1] + segC
 
