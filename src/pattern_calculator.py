@@ -176,6 +176,13 @@ class JeansPatternCalculator:
             pocket_patch, waistband, outer_seam_curve
         )
 
+        # 裁片拆分: 前片整体轮廓
+        front_panel_outline = self._calculate_front_panel_outline(
+            waistband, crescent_pocket, knee_hem, crotch_ext_point,
+            outer_seam_curve, inner_seam_curve, front_rise_curve,
+            lower_waistline_curve
+        )
+
         # 组装所有点
         self.points = PatternPoints(
             params=self.params,
@@ -194,7 +201,8 @@ class JeansPatternCalculator:
             inner_seam_curve=inner_seam_curve,
             front_rise_curve=front_rise_curve,
             waistline_curve=waistline_curve,
-            lower_waistline_curve=lower_waistline_curve
+            lower_waistline_curve=lower_waistline_curve,
+            front_panel_outline=front_panel_outline
         )
 
         return self.points
@@ -323,55 +331,82 @@ class JeansPatternCalculator:
     def _calculate_outer_seam_curve(self, knee_hem: KneeHemPoints,
                                     bbox: BoundingBox,
                                     waist_outer: Tuple[float, float]) -> List[Tuple[float, float]]:
-        """计算外侧缝曲线（向外凸出的圆顺弧线）"""
+        """计算外侧缝曲线（向外凸出的圆顺弧线）
+        膝围处与脚口->膝围直线段平滑相切（G1连续），臀围处两段弧线相切（G1连续），
+        同时保持原弧线的整体外凸形状不变。
+        """
         # 关键点: 脚口外 -> 膝围外 -> 臀围外 -> 腰围外
         hip_outer = (bbox.outer_seam_x, bbox.hip_y)
+        knee_outer = knee_hem.knee_outer
+        hem_outer = knee_hem.hem_outer
 
-        # 使用三次贝塞尔曲线
-        # 第一段: 脚口外 -> 膝围外（直线段）
-        # 第二段: 膝围外 -> 臀围外 -> 腰围外（曲线段）
+        # 脚口->膝围直线方向（用于膝围处相切）
+        line_dx = knee_outer[0] - hem_outer[0]
+        line_dy = knee_outer[1] - hem_outer[1]
+        line_len = math.hypot(line_dx, line_dy)
+        line_ux, line_uy = line_dx / line_len, line_dy / line_len
 
-        # 构建控制点 - 向外凸出
-        # 膝围到臀围的控制点
-        mid1 = lerp(0.5, knee_hem.knee_outer, hip_outer)
-        ctrl1 = (mid1[0] - 0.5, mid1[1])  # 向外微凸
+        # 膝围->臀围：三次贝塞尔
+        # 起点控制点在脚口->膝围直线的延长线上（保证膝围处G1相切）
+        c1 = (knee_outer[0] + line_ux * 8.0, knee_outer[1] + line_uy * 8.0)
+        # 终点控制点反解自原二次贝塞尔的中点（保持原弧线外凸形状：
+        # 原控制点 mid1-0.5x 对应的曲线中点为 mid1-0.25x）
+        mid1 = lerp(0.5, knee_outer, hip_outer)
+        target_mid = (mid1[0] - 0.25, mid1[1])
+        c2 = ((8 * target_mid[0] - knee_outer[0] - 3 * c1[0] - hip_outer[0]) / 3,
+              (8 * target_mid[1] - knee_outer[1] - 3 * c1[1] - hip_outer[1]) / 3)
 
-        # 臀围到腰围的控制点
-        mid2 = lerp(0.5, hip_outer, waist_outer)
-        ctrl2 = (mid2[0] - 0.8, mid2[1])  # 稍多凸出
+        # 臀围->腰围：二次贝塞尔，起点控制点与上段在臀围处的切线共线（G1相切）
+        tan_dx = hip_outer[0] - c2[0]
+        tan_dy = hip_outer[1] - c2[1]
+        tan_len = math.hypot(tan_dx, tan_dy)
+        ctrl2 = (hip_outer[0] + tan_dx / tan_len * 8.0,
+                 hip_outer[1] + tan_dy / tan_len * 8.0)
 
-        # 采样整条曲线
-        points = [knee_hem.hem_outer, knee_hem.knee_outer, ctrl1, hip_outer, ctrl2, waist_outer]
-
-        # 分段采样
+        # 分段采样（加密采样，保证绘制圆顺）
         curve = []
         # 脚口到膝围（直线）
-        curve.extend(sample_bezier_curve([points[0], points[1]], samples=10))
-        # 膝围到臀围（曲线）
-        seg2 = sample_bezier_curve([points[1], points[2], points[3]], samples=15)
+        curve.extend(sample_bezier_curve([hem_outer, knee_outer], samples=60))
+        # 膝围到臀围（三次贝塞尔，膝围处相切）
+        seg2 = sample_bezier_curve([knee_outer, c1, c2, hip_outer], samples=60)
         curve.extend(seg2[1:])
-        # 臀围到腰围（曲线）
-        seg3 = sample_bezier_curve([points[3], points[4], points[5]], samples=15)
+        # 臀围到腰围（二次贝塞尔，臀围处相切）
+        seg3 = sample_bezier_curve([hip_outer, ctrl2, waist_outer], samples=60)
         curve.extend(seg3[1:])
 
         return curve
 
     def _calculate_inner_seam_curve(self, knee_hem: KneeHemPoints,
                                     crotch_ext_point: Tuple[float, float]) -> List[Tuple[float, float]]:
-        """计算内侧缝曲线（内收的圆顺弧线）"""
+        """计算内侧缝曲线（内收的圆顺弧线）
+        膝围处与脚口->膝围直线段平滑相切（G1连续），保持原弧线内收形状不变。
+        """
         # 关键点: 脚口内 -> 膝围内 -> 立裆宽顶点
+        knee_inner = knee_hem.knee_inner
+        hem_inner = knee_hem.hem_inner
 
-        # 构建控制点 - 向内收
-        # 膝围到立裆的控制点，向内微凹
-        mid = lerp(0.5, knee_hem.knee_inner, crotch_ext_point)
-        ctrl = (mid[0] - 0.8, mid[1])  # 向内收
+        # 脚口->膝围直线方向（用于膝围处相切）
+        line_dx = knee_inner[0] - hem_inner[0]
+        line_dy = knee_inner[1] - hem_inner[1]
+        line_len = math.hypot(line_dx, line_dy)
+        line_ux, line_uy = line_dx / line_len, line_dy / line_len
 
-        # 采样
+        # 膝围->立裆：三次贝塞尔
+        # 起点控制点在脚口->膝围直线的延长线上（保证膝围处G1相切）
+        c1 = (knee_inner[0] + line_ux * 8.0, knee_inner[1] + line_uy * 8.0)
+        # 终点控制点反解自原二次贝塞尔的中点（保持原内收形状：
+        # 原控制点 mid-0.8x 对应的曲线中点为 mid-0.4x）
+        mid = lerp(0.5, knee_inner, crotch_ext_point)
+        target_mid = (mid[0] - 0.4, mid[1])
+        c2 = ((8 * target_mid[0] - knee_inner[0] - 3 * c1[0] - crotch_ext_point[0]) / 3,
+              (8 * target_mid[1] - knee_inner[1] - 3 * c1[1] - crotch_ext_point[1]) / 3)
+
+        # 采样（加密采样，保证绘制圆顺）
         curve = []
         # 脚口到膝围（近乎直线）
-        curve.extend(sample_bezier_curve([knee_hem.hem_inner, knee_hem.knee_inner], samples=10))
-        # 膝围到立裆（内收弧线）
-        seg = sample_bezier_curve([knee_hem.knee_inner, ctrl, crotch_ext_point], samples=20)
+        curve.extend(sample_bezier_curve([hem_inner, knee_inner], samples=60))
+        # 膝围到立裆（内收弧线，膝围处相切）
+        seg = sample_bezier_curve([knee_inner, c1, c2, crotch_ext_point], samples=60)
         curve.extend(seg[1:])
 
         return curve
@@ -388,7 +423,7 @@ class JeansPatternCalculator:
 
         # ========== 上半段：腰围参考点 -> 臀围内侧顶点 (纯直线) ==========
         # 直接使用两点采样，生成直线段
-        upper_curve = sample_bezier_curve([waist_ref_point, hip_point], samples=15)
+        upper_curve = sample_bezier_curve([waist_ref_point, hip_point], samples=45)
 
         # ========== 下半段：臀围内侧顶点 -> 立裆宽顶点 (深凹J型) ==========
         # 为了保证与上半段直线的"顺滑过渡"，下半段起步的控制点必须在直线的延长线上
@@ -417,7 +452,7 @@ class JeansPatternCalculator:
             (ctrl0_lower_x, ctrl0_lower_y),
             (ctrl1_lower_x, ctrl1_lower_y),
             crotch_point
-        ], samples=30)
+        ], samples=90)
 
         # 拼接曲线（去掉上半段最后一个重复的交点，避免重叠）
         full_curve = upper_curve[:-1] + lower_curve
@@ -470,7 +505,7 @@ class JeansPatternCalculator:
         control_point = (mid_x, mid_y - 0.4)
 
         # 采样贝塞尔曲线
-        curve = sample_bezier_curve([waist_outer, control_point, waist_inner_final], samples=20)
+        curve = sample_bezier_curve([waist_outer, control_point, waist_inner_final], samples=60)
 
         return curve, control_point
 
@@ -730,7 +765,7 @@ class JeansPatternCalculator:
             (ctrl1_x, ctrl1_y),
             (ctrl2_x, ctrl2_y),
             fly_outer_end
-        ], samples=20)
+        ], samples=60)
 
         return curve, arc_start_point
 
@@ -796,6 +831,50 @@ class JeansPatternCalculator:
             fly_panel_outline=fly_panel_outline
         )
 
+    def _calculate_front_panel_outline(self, waistband: WaistbandPoints,
+                                        crescent_pocket: CrescentPocketPoints,
+                                        knee_hem: KneeHemPoints,
+                                        crotch_ext_point: Tuple[float, float],
+                                        outer_seam_curve: List[Tuple[float, float]],
+                                        inner_seam_curve: List[Tuple[float, float]],
+                                        front_rise_curve: List[Tuple[float, float]],
+                                        lower_waistline_curve: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """裁片拆分: 前片整体轮廓（闭合）
+        从下腰头内缝顶点出发，依次为：
+        1. 下腰头段：下腰头内缝顶点 → 月牙袋省道点（沿下腰头线）
+        2. 月牙袋省道弧线：月牙袋省道点 → 月牙袋外缝顶点
+        3. 外侧缝段：月牙袋外缝顶点 → 脚口外缝顶点
+        4. 脚口线：脚口外缝顶点 → 脚口内缝顶点
+        5. 内侧缝段：脚口内缝顶点 → 立裆宽顶点
+        6. 前浪段：立裆宽顶点 → 下腰头内缝顶点（闭合）
+        """
+        outline = []
+        # 1. 下腰头段（下腰头内缝顶点 → 月牙袋省道点）
+        waist_seg = self._extract_curve_segment_exact(
+            lower_waistline_curve, waistband.lower_waist_inner, crescent_pocket.pocket_dart
+        )
+        outline.extend(waist_seg)
+        # 2. 月牙袋省道弧线（省道点 → 外缝顶点，pocket_dart_curve 方向一致）
+        outline.extend(crescent_pocket.pocket_dart_curve[1:])
+        # 3. 外侧缝段（月牙袋外缝顶点 → 脚口外缝顶点）
+        outer_seg = self._extract_curve_segment_exact(
+            outer_seam_curve, crescent_pocket.pocket_outer, knee_hem.hem_outer
+        )
+        outline.extend(outer_seg[1:])
+        # 4. 脚口线（脚口外缝顶点 → 脚口内缝顶点）
+        outline.append(knee_hem.hem_inner)
+        # 5. 内侧缝段（脚口内缝顶点 → 立裆宽顶点）
+        inner_seg = self._extract_curve_segment_exact(
+            inner_seam_curve, knee_hem.hem_inner, crotch_ext_point
+        )
+        outline.extend(inner_seg[1:])
+        # 6. 前浪段（立裆宽顶点 → 下腰头内缝顶点，闭合）
+        rise_seg = self._extract_curve_segment_exact(
+            front_rise_curve, crotch_ext_point, waistband.lower_waist_inner
+        )
+        outline.extend(rise_seg[1:])
+        return outline
+
     def _get_crescent_pocket_controls(self, p0: Tuple[float, float],
                                       p1: Tuple[float, float],
                                       offset: float) -> Tuple[Tuple[float, float], Tuple[float, float], float, float]:
@@ -841,7 +920,7 @@ class JeansPatternCalculator:
             ctrl1,
             ctrl2,
             pocket_width
-        ], samples=20)
+        ], samples=60)
 
     def _calculate_crescent_pocket(self, waistband: WaistbandPoints,
                                    outer_seam_curve: List[Tuple[float, float]],
@@ -969,7 +1048,7 @@ class JeansPatternCalculator:
             ctrl2_dart,
             ctrl1_dart,
             pocket_outer
-        ], samples=20)
+        ], samples=60)
 
     def _calculate_pocket_patch(self, crescent_pocket: CrescentPocketPoints,
                                  outer_seam_curve: List[Tuple[float, float]],
@@ -1032,7 +1111,7 @@ class JeansPatternCalculator:
             patch_ctrl_near_waist,
             patch_ctrl_near_outer,
             patch_outer_seam
-        ], samples=20)
+        ], samples=60)
 
     def _find_ray_curve_intersection(self, start_point: Tuple[float, float],
                                       direction: Tuple[float, float],
@@ -1168,7 +1247,7 @@ class JeansPatternCalculator:
         # 外侧缝曲线自然方向朝上(腰围)，ctrl2 沿其反方向(向下)使弧线与外缝相切
         ctrl2 = (bag_outer_seam[0] - 2.5 * seam_tangent[0],
                  bag_outer_seam[1] - 2.5 * seam_tangent[1])
-        bag_curve = sample_bezier_curve([bag_corner, ctrl1, ctrl2, bag_outer_seam], samples=20)
+        bag_curve = sample_bezier_curve([bag_corner, ctrl1, ctrl2, bag_outer_seam], samples=60)
 
         # 7. 袋布顶边：外缝顶点沿外缝向上至下腰头外缝顶点，再沿下腰头至上腰头顶点
         bag_top_edge = []

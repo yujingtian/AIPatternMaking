@@ -295,3 +295,6 @@ class PatternPoints:
     front_rise_curve: List[Tuple[float, float]]  # 前浪曲线
     waistline_curve: List[Tuple[float, float]]   # 上腰头曲线
     lower_waistline_curve: List[Tuple[float, float]]  # 下腰头曲线
+
+    # 前片整体轮廓（裁片拆分，闭合轮廓）
+    front_panel_outline: Optional[List[Tuple[float, float]]] = None

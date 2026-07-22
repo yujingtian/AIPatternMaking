@@ -56,6 +56,9 @@ class DXFExporter:
         # 单独绘制门襟裁片（闭合轮廓，平移到前片下方）
         self._draw_fly_panel(msp, points)
 
+        # 单独绘制前片整体轮廓（闭合裁片，平移到最右侧）
+        self._draw_front_panel(msp, points, back_points)
+
         # 绘制关键点标注
         self._draw_points(msp, points)
 
@@ -97,6 +100,8 @@ class DXFExporter:
         doc.layers.add(name='FRONTFLY', color=3)
         # 门襟裁片层 - 绿色
         doc.layers.add(name='FLYPANEL', color=3)
+        # 前片整体轮廓裁片层 - 白/黑
+        doc.layers.add(name='FRONTPANEL', color=7)
         # 月牙袋层 - 紫色
         doc.layers.add(name='POCKET', color=6)
         # 袋贴层 - 黄色
@@ -574,6 +579,35 @@ class DXFExporter:
         text = msp.add_text('FLY_PANEL', dxfattribs={'layer': 'FLYPANEL', 'height': 2.5 * self.scale})
         text.dxf.insert = (label_x, label_y)
 
+    def _draw_front_panel(self, msp: Modelspace, points: PatternPoints,
+                          back_points: Optional[BackPatternPoints] = None) -> None:
+        """单独绘制前片整体轮廓（闭合裁片，平移到最右侧）"""
+        outline = getattr(points, 'front_panel_outline', None)
+        if not outline:
+            return
+        panel_min_x = min(p[0] for p in outline)
+        # 计算左侧已有图形的最右边缘（前片或后片）
+        front_max_x = points.front_rise.crotch_extension_point[0]
+        right_edge = front_max_x
+        if back_points is not None:
+            back_offset_x = front_max_x + 8.0
+            back_max_x = max(
+                back_points.bounding_box.inner_seam_x,
+                back_points.crotch.back_crotch_point[0],
+                back_points.waist_final.new_waist_inner[0],
+                back_points.knee_hem.hem_inner[0],
+            )
+            right_edge = back_offset_x + back_max_x
+        offset_x = right_edge + 8.0 - panel_min_x  # 与左侧图形间隔8cm
+        dxf_pts = [self._to_dxf_coords(x + offset_x, y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'FRONTPANEL'})
+        # 裁片标注
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline)
+        label_x, label_y = self._to_dxf_coords((panel_min_x + max_px) / 2 + offset_x, max_py + 1.5)
+        text = msp.add_text('FRONT_PANEL', dxfattribs={'layer': 'FRONTPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
     def _draw_crescent_pocket(self, msp: Modelspace, points: PatternPoints) -> None:
         """绘制月牙袋"""
         pocket = points.crescent_pocket
@@ -775,6 +809,14 @@ class SimpleDXFExporter:
                 offset_y = -(panel_max_y + 5.0)
                 dxf_panel_points = [(x * self.scale, (y + offset_y) * self.scale) for x, y in panel_outline]
                 msp.add_lwpolyline(dxf_panel_points, close=True)
+
+        # 前片整体轮廓裁片平移到右侧单独展示
+        front_panel = getattr(points, 'front_panel_outline', None)
+        if front_panel:
+            panel_min_x = min(p[0] for p in front_panel)
+            offset_x = points.front_rise.crotch_extension_point[0] + 8.0 - panel_min_x
+            dxf_fp_points = [((x + offset_x) * self.scale, y * self.scale) for x, y in front_panel]
+            msp.add_lwpolyline(dxf_fp_points, close=True)
 
         # 如果有月牙袋，也添加月牙袋轮廓
         if hasattr(points, 'crescent_pocket'):
