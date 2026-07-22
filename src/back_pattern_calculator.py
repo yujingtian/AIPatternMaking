@@ -93,6 +93,11 @@ class BackPanelCalculator:
             waist_final, dart, band_width=4.0
         )
 
+        # 裁片拆分: 机头裁片（闭合，腰省已拼合）
+        jitou_panel_outline = self._calculate_jitou_panel_outline(
+            waist_final, waistband, jitou, dart, rise, seam
+        )
+
         self.points = BackPatternPoints(
             params=self.params,
             bounding_box=bounding_box,
@@ -108,9 +113,175 @@ class BackPanelCalculator:
             jitou=jitou,
             back_pocket=back_pocket,
             back_panel_outline=back_panel_outline,
-            back_waistband_outline=back_waistband_outline
+            back_waistband_outline=back_waistband_outline,
+            jitou_panel_outline=jitou_panel_outline
         )
         return self.points
+
+    def _make_rigid_transform(self, src_p: Tuple[float, float], src_q: Tuple[float, float],
+                               dst_p: Tuple[float, float], dst_q: Tuple[float, float]):
+        """构造刚体变换（旋转+平移）：将 src_p 映射到 dst_p，
+        并将 src_p→src_q 的方向旋转到 dst_p→dst_q 的方向。
+        返回变换函数 T(p)。"""
+        a_src = math.atan2(src_q[1] - src_p[1], src_q[0] - src_p[0])
+        a_dst = math.atan2(dst_q[1] - dst_p[1], dst_q[0] - dst_p[0])
+        theta = a_dst - a_src
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+        def transform(p: Tuple[float, float]) -> Tuple[float, float]:
+            dx, dy = p[0] - src_p[0], p[1] - src_p[1]
+            return (dst_p[0] + dx * cos_t - dy * sin_t,
+                    dst_p[1] + dx * sin_t + dy * cos_t)
+
+        return transform
+
+    def _segment_intersect(self, p1, p2, p3, p4):
+        """两线段交点：p1p2 与 p3p4。不相交（或平行）返回 None。"""
+        d1 = (p2[0] - p1[0], p2[1] - p1[1])
+        d2 = (p4[0] - p3[0], p4[1] - p3[1])
+        det = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(det) < 1e-12:
+            return None
+        r = (p3[0] - p1[0], p3[1] - p1[1])
+        t = (r[0] * d2[1] - r[1] * d2[0]) / det
+        s = (r[0] * d1[1] - r[1] * d1[0]) / det
+        if -1e-9 <= t <= 1 + 1e-9 and -1e-9 <= s <= 1 + 1e-9:
+            return (p1[0] + t * d1[0], p1[1] + t * d1[1])
+        return None
+
+    def _line_polyline_intersect(self, curve: List[Tuple[float, float]],
+                                  a, b):
+        """线段 ab 与折线 curve 的第一个交点。无交点返回 None。"""
+        for i in range(len(curve) - 1):
+            q = self._segment_intersect(a, b, curve[i], curve[i + 1])
+            if q is not None:
+                return q
+        return None
+
+    def _walk_along(self, pts: List[Tuple[float, float]], i0: int,
+                    dist: float, step: int):
+        """从 pts[i0] 沿折线向 step 方向（±1）走 dist cm，
+        返回 (目标点q, 外侧端索引j)，q 位于 pts[j-step] 与 pts[j] 之间。"""
+        i = i0
+        remain = dist
+        while True:
+            j = i + step
+            if j < 0 or j >= len(pts):
+                return pts[i], i
+            seg = point_distance(pts[i], pts[j])
+            if seg >= remain and seg > 1e-12:
+                t = remain / seg
+                q = (pts[i][0] + t * (pts[j][0] - pts[i][0]),
+                     pts[i][1] + t * (pts[j][1] - pts[i][1]))
+                return q, j
+            remain -= seg
+            i = j
+
+    def _smooth_corner(self, pts: List[Tuple[float, float]],
+                       corner: Tuple[float, float], span_back: float = 2.0,
+                       span_fwd: float = None) -> List[Tuple[float, float]]:
+        """将折线上 corner 处的夹角用弧线圆顺：
+        在夹角点两侧沿折线各取 span_back / span_fwd cm 作为切点（不传 span_fwd 时与 span_back 相同），
+        用三次贝塞尔连接两切点，两个控制点同取两侧切线的交点，使弧线两端与折线精确相切。"""
+        if span_fwd is None:
+            span_fwd = span_back
+        i0 = min(range(len(pts)), key=lambda i: point_distance(pts[i], corner))
+        qA, jA = self._walk_along(pts, i0, span_back, -1)   # qA 在线段 (jA, jA+1) 上
+        qB, jB = self._walk_along(pts, i0, span_fwd, +1)    # qB 在线段 (jB-1, jB) 上
+        if jB - jA < 1 or jA + 1 >= len(pts) or jB - 1 < 0:
+            return pts
+        dA = (pts[jA + 1][0] - pts[jA][0], pts[jA + 1][1] - pts[jA][1])
+        nA = math.hypot(*dA) or 1.0
+        dA = (dA[0] / nA, dA[1] / nA)
+        dB = (pts[jB][0] - pts[jB - 1][0], pts[jB][1] - pts[jB - 1][1])
+        nB = math.hypot(*dB) or 1.0
+        dB = (dB[0] / nB, dB[1] / nB)
+        ctrl = self._line_intersect(qA, dA, qB, dB)
+        if ctrl is None:
+            ctrl = ((qA[0] + qB[0]) / 2, (qA[1] + qB[1]) / 2)
+        bez = sample_bezier_curve([qA, ctrl, ctrl, qB], samples=40)
+        return pts[:jA + 1] + [qA] + bez[1:] + pts[jB:]
+
+    def _calculate_jitou_panel_outline(self, waist_final: BackWaistFinalPoints,
+                                       waistband: BackWaistbandPoints,
+                                       jitou: BackJitouPoints,
+                                       dart: BackDartPoints,
+                                       rise: BackRisePoints,
+                                       seam: BackSeamPoints) -> List[Tuple[float, float]]:
+        """裁片拆分: 机头裁片（闭合，腰省已拼合）
+        1. 机头区域：顶边(下腰头弧线) + 内缝侧边(后浪) + 底边(机头线) + 外缝侧边(外缝)。
+        2. 腰省穿透机头：两条省边线分别交下腰头线于上省交点(外/内)、
+           交机头线于下省交点(外/内)，挖除梯形省区。
+        3. 刚体拼合：内缝侧整体旋转平移，上省交点(内)→上省交点(外)，
+           省边线(内)方向与省边线(外)一致（下省交点残差在圆顺时吸收）。
+        4. 圆顺：顶边与底边在拼合处的夹角各用 _smooth_corner 画圆顺。
+        """
+        top_curve = list(waistband.lower_waist_curve)     # 下腰头外端点 → 下腰头内端点
+        lower_outer = waistband.lower_waist_outer
+        lower_inner = waistband.lower_waist_inner
+        jitou_inner = jitou.jitou_inner
+        jitou_outer = jitou.jitou_outer
+        full_rise = [waist_final.new_waist_inner] + rise.rise_curve
+        full_outer = [waist_final.new_waist_outer] + seam.outer_seam_curve
+
+        # 未挖省的完整机头轮廓（兜底用）
+        def full_outline():
+            ol = list(top_curve)
+            ol.extend(self._extract_curve_segment_exact(
+                full_rise, lower_inner, jitou_inner)[1:])
+            ol.append(jitou_outer)
+            ol.extend(self._extract_curve_segment_exact(
+                full_outer, jitou_outer, lower_outer)[1:])
+            return ol
+
+        # ----- 2. 省边线与顶边/底边的交点 -----
+        top_outer = self._line_polyline_intersect(top_curve, dart.dart_outer, dart.dart_tip)
+        top_inner = self._line_polyline_intersect(top_curve, dart.dart_inner, dart.dart_tip)
+        bot_outer = self._segment_intersect(dart.dart_outer, dart.dart_tip,
+                                            jitou_outer, jitou_inner)
+        bot_inner = self._segment_intersect(dart.dart_inner, dart.dart_tip,
+                                            jitou_outer, jitou_inner)
+        if None in (top_outer, top_inner, bot_outer, bot_inner):
+            return full_outline()
+
+        # ----- 3. 刚体拼合：上省交点(内)→上省交点(外)，省边线方向对齐 -----
+        T = self._make_rigid_transform(top_inner, bot_inner, top_outer, bot_outer)
+
+        # ----- 4. 拼合轮廓（从下腰头外端点出发） -----
+        def plen(seg):
+            return sum(point_distance(seg[i - 1], seg[i]) for i in range(1, len(seg)))
+
+        outline = []
+        # 顶边（外缝侧）：下腰头外端点 → 上省交点(外)
+        seg_top_left = self._extract_curve_segment_exact(top_curve, lower_outer, top_outer)
+        outline.extend(seg_top_left)
+        # 顶边（内缝侧，拼合后）：上省交点(内) → 下腰头内端点
+        seg_top_right = self._extract_curve_segment_exact(top_curve, top_inner, lower_inner)
+        outline.extend([T(p) for p in seg_top_right[1:]])
+        # 内缝侧边：下腰头内端点 → 机头内缝顶点（沿后浪）
+        seg = self._extract_curve_segment_exact(full_rise, lower_inner, jitou_inner)
+        outline.extend([T(p) for p in seg[1:]])
+        # 底边（内缝侧，拼合后）：机头内缝顶点 → 下省交点(内)
+        outline.extend([T(p) for p in [jitou_inner, bot_inner]][1:])
+        # 底边（外缝侧）：下省交点(外) → 机头外缝顶点
+        #   T(下省交点内) 与 下省交点(外) 的残差沿省边线方向，圆顺时吸收
+        outline.extend([bot_outer, jitou_outer])
+        # 外缝侧边：机头外缝顶点 → 下腰头外端点（沿外侧缝向上），闭合
+        outline.extend(self._extract_curve_segment_exact(
+            full_outer, jitou_outer, lower_outer)[1:])
+
+        # ----- 5. 拼合处圆顺（类比后腰头：边缘两端各留 3cm 直线，
+        #          中间整条用弧线过渡，把夹角分摊到整条弧线上） -----
+        straight = 3.0
+        outline = self._smooth_corner(
+            outline, top_outer,
+            max(1.0, plen(seg_top_left) - straight),
+            max(1.0, plen(seg_top_right) - straight))
+        outline = self._smooth_corner(
+            outline, bot_outer,
+            max(1.0, point_distance(jitou_inner, bot_inner) - straight),
+            max(1.0, point_distance(bot_outer, jitou_outer) - straight))
+        return outline
 
     def _project_point_on_curve(self, curve: List[Tuple[float, float]],
                                  p: Tuple[float, float]):
