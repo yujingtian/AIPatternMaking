@@ -298,3 +298,12 @@ class PatternPoints:
 
     # 前片整体轮廓（裁片拆分，闭合轮廓）
     front_panel_outline: Optional[List[Tuple[float, float]]] = None
+
+    # 前腰头裁片（裁片拆分，闭合轮廓，省道已拼合）
+    front_waistband_outline: Optional[List[Tuple[float, float]]] = None
+
+    # 袋贴裁片（裁片拆分，闭合轮廓）
+    pocket_patch_outline: Optional[List[Tuple[float, float]]] = None
+
+    # 小表袋裁片（裁片拆分，闭合轮廓）
+    watch_pocket_outline: Optional[List[Tuple[float, float]]] = None

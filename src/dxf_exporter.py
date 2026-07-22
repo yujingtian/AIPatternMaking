@@ -59,6 +59,15 @@ class DXFExporter:
         # 单独绘制前片整体轮廓（闭合裁片，平移到最右侧）
         self._draw_front_panel(msp, points, back_points)
 
+        # 单独绘制前腰头裁片（闭合裁片，平移到门襟裁片下方）
+        self._draw_front_waistband(msp, points)
+
+        # 单独绘制袋贴裁片（闭合裁片，平移到前腰头裁片下方）
+        self._draw_pocket_patch_panel(msp, points)
+
+        # 单独绘制小表袋裁片（闭合裁片，平移到袋贴裁片下方）
+        self._draw_watch_pocket_panel(msp, points)
+
         # 绘制关键点标注
         self._draw_points(msp, points)
 
@@ -102,6 +111,12 @@ class DXFExporter:
         doc.layers.add(name='FLYPANEL', color=3)
         # 前片整体轮廓裁片层 - 白/黑
         doc.layers.add(name='FRONTPANEL', color=7)
+        # 前腰头裁片层 - 橙色
+        doc.layers.add(name='FRONTWAISTBAND', color=30)
+        # 袋贴裁片层 - 青色
+        doc.layers.add(name='POCKETPATCHPANEL', color=4)
+        # 小表袋裁片层 - 金色
+        doc.layers.add(name='WATCHPOCKETPANEL', color=50)
         # 月牙袋层 - 紫色
         doc.layers.add(name='POCKET', color=6)
         # 袋贴层 - 黄色
@@ -601,11 +616,108 @@ class DXFExporter:
         offset_x = right_edge + 8.0 - panel_min_x  # 与左侧图形间隔8cm
         dxf_pts = [self._to_dxf_coords(x + offset_x, y) for x, y in outline]
         msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'FRONTPANEL'})
+        # 裁片上的前门襟（门襟线 + 门襟弧线）
+        fly = getattr(points, 'front_fly', None)
+        if fly is not None:
+            fly_start = self._to_dxf_coords(fly.fly_start_point[0] + offset_x, fly.fly_start_point[1])
+            fly_arc_start = self._to_dxf_coords(fly.fly_end_point[0] + offset_x, fly.fly_end_point[1])
+            msp.add_line(fly_start, fly_arc_start, dxfattribs={'layer': 'FRONTFLY'})
+            fly_curve_pts = [self._to_dxf_coords(x + offset_x, y) for x, y in fly.fly_curve]
+            msp.add_lwpolyline(fly_curve_pts, dxfattribs={'layer': 'FRONTFLY'})
         # 裁片标注
         max_px = max(p[0] for p in outline)
         max_py = max(p[1] for p in outline)
         label_x, label_y = self._to_dxf_coords((panel_min_x + max_px) / 2 + offset_x, max_py + 1.5)
         text = msp.add_text('FRONT_PANEL', dxfattribs={'layer': 'FRONTPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
+    def _panel_stack_bottom_y(self, points: PatternPoints,
+                              include_waistband: bool = False,
+                              include_patch: bool = False) -> float:
+        """计算纵向堆叠裁片区域的底部Y坐标（门襟、前腰头、袋贴裁片依次向下堆叠）"""
+        bottom_y = 0.0
+        fly = getattr(points, 'front_fly', None)
+        fly_outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+        if fly_outline:
+            bottom_y = (min(p[1] for p in fly_outline)
+                        - (max(p[1] for p in fly_outline) + 5.0))
+        if include_waistband or include_patch:
+            wb = getattr(points, 'front_waistband_outline', None)
+            if wb:
+                bottom_y = bottom_y - 5.0 - (max(p[1] for p in wb) - min(p[1] for p in wb))
+        if include_patch:
+            patch = getattr(points, 'pocket_patch_outline', None)
+            if patch:
+                bottom_y = bottom_y - 5.0 - (max(p[1] for p in patch) - min(p[1] for p in patch))
+        return bottom_y
+
+    def _draw_front_waistband(self, msp: Modelspace, points: PatternPoints) -> None:
+        """单独绘制前腰头裁片（闭合轮廓，平移到门襟裁片下方）"""
+        outline = getattr(points, 'front_waistband_outline', None)
+        if not outline:
+            return
+        bottom_y = self._panel_stack_bottom_y(points)
+        wb_max_y = max(p[1] for p in outline)
+        offset_y = bottom_y - 5.0 - wb_max_y  # 与上方图形间隔5cm
+        dxf_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'FRONTWAISTBAND'})
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        label_x, label_y = self._to_dxf_coords((min_px + max_px) / 2, wb_max_y + offset_y + 1.5)
+        text = msp.add_text('FRONT_WAISTBAND', dxfattribs={'layer': 'FRONTWAISTBAND', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
+    def _draw_pocket_patch_panel(self, msp: Modelspace, points: PatternPoints) -> None:
+        """单独绘制袋贴裁片（闭合轮廓，平移到前腰头裁片下方）
+        裁片上同时绘制月牙袋弧线和小表袋轮廓作为对位线。"""
+        outline = getattr(points, 'pocket_patch_outline', None)
+        if not outline:
+            return
+        bottom_y = self._panel_stack_bottom_y(points, include_waistband=True)
+        patch_max_y = max(p[1] for p in outline)
+        offset_y = bottom_y - 5.0 - patch_max_y  # 与上方图形间隔5cm
+        dxf_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'POCKETPATCHPANEL'})
+
+        def draw_line(pts, layer):
+            line_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in pts]
+            msp.add_lwpolyline(line_pts, dxfattribs={'layer': layer})
+
+        # 月牙袋弧线（袋口对位线）
+        pocket = getattr(points, 'crescent_pocket', None)
+        if pocket is not None:
+            draw_line(pocket.pocket_curve, 'POCKET')
+        # 小表袋轮廓（对位线）：顶边 + 外线 + 内线 + 底边
+        wp = getattr(points, 'watch_pocket', None)
+        if wp is not None:
+            draw_line([wp.outer_upper, wp.inner_upper], 'WATCHPOCKET')
+            draw_line(wp.outer_line, 'WATCHPOCKET')
+            draw_line(wp.inner_line, 'WATCHPOCKET')
+            draw_line(wp.bottom_curve, 'WATCHPOCKET')
+
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        label_x, label_y = self._to_dxf_coords((min_px + max_px) / 2, patch_max_y + offset_y + 1.5)
+        text = msp.add_text('POCKET_PATCH', dxfattribs={'layer': 'POCKETPATCHPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
+
+    def _draw_watch_pocket_panel(self, msp: Modelspace, points: PatternPoints) -> None:
+        """单独绘制小表袋裁片（闭合轮廓，平移到袋贴裁片下方）"""
+        outline = getattr(points, 'watch_pocket_outline', None)
+        if not outline:
+            return
+        bottom_y = self._panel_stack_bottom_y(points, include_patch=True)
+        wp_max_y = max(p[1] for p in outline)
+        offset_y = bottom_y - 5.0 - wp_max_y  # 与上方图形间隔5cm
+        dxf_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, close=True, dxfattribs={'layer': 'WATCHPOCKETPANEL'})
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        label_x, label_y = self._to_dxf_coords((min_px + max_px) / 2, wp_max_y + offset_y + 1.5)
+        text = msp.add_text('WATCH_POCKET', dxfattribs={'layer': 'WATCHPOCKETPANEL', 'height': 2.5 * self.scale})
         text.dxf.insert = (label_x, label_y)
 
     def _draw_crescent_pocket(self, msp: Modelspace, points: PatternPoints) -> None:
@@ -810,6 +922,52 @@ class SimpleDXFExporter:
                 dxf_panel_points = [(x * self.scale, (y + offset_y) * self.scale) for x, y in panel_outline]
                 msp.add_lwpolyline(dxf_panel_points, close=True)
 
+        # 前腰头裁片平移到门襟裁片下方单独展示
+        front_wb = getattr(points, 'front_waistband_outline', None)
+        if front_wb:
+            bottom_y = 0.0
+            fly = getattr(points, 'front_fly', None)
+            fly_outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+            if fly_outline:
+                bottom_y = (min(p[1] for p in fly_outline)
+                            - (max(p[1] for p in fly_outline) + 5.0))
+            wb_offset_y = bottom_y - 5.0 - max(p[1] for p in front_wb)
+            dxf_wb_points = [(x * self.scale, (y + wb_offset_y) * self.scale) for x, y in front_wb]
+            msp.add_lwpolyline(dxf_wb_points, close=True)
+
+        # 袋贴裁片平移到前腰头裁片下方单独展示
+        patch_panel = getattr(points, 'pocket_patch_outline', None)
+        if patch_panel:
+            bottom_y = 0.0
+            fly = getattr(points, 'front_fly', None)
+            fly_outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+            if fly_outline:
+                bottom_y = (min(p[1] for p in fly_outline)
+                            - (max(p[1] for p in fly_outline) + 5.0))
+            wb = getattr(points, 'front_waistband_outline', None)
+            if wb:
+                bottom_y = bottom_y - 5.0 - (max(p[1] for p in wb) - min(p[1] for p in wb))
+            patch_offset_y = bottom_y - 5.0 - max(p[1] for p in patch_panel)
+            dxf_pp_points = [(x * self.scale, (y + patch_offset_y) * self.scale) for x, y in patch_panel]
+            msp.add_lwpolyline(dxf_pp_points, close=True)
+
+        # 小表袋裁片平移到袋贴裁片下方单独展示
+        wp_panel = getattr(points, 'watch_pocket_outline', None)
+        if wp_panel:
+            bottom_y = 0.0
+            fly = getattr(points, 'front_fly', None)
+            fly_outline = getattr(fly, 'fly_panel_outline', None) if fly else None
+            if fly_outline:
+                bottom_y = (min(p[1] for p in fly_outline)
+                            - (max(p[1] for p in fly_outline) + 5.0))
+            for panel in (getattr(points, 'front_waistband_outline', None),
+                          getattr(points, 'pocket_patch_outline', None)):
+                if panel:
+                    bottom_y = bottom_y - 5.0 - (max(p[1] for p in panel) - min(p[1] for p in panel))
+            wp_offset_y = bottom_y - 5.0 - max(p[1] for p in wp_panel)
+            dxf_wp_points = [(x * self.scale, (y + wp_offset_y) * self.scale) for x, y in wp_panel]
+            msp.add_lwpolyline(dxf_wp_points, close=True)
+
         # 前片整体轮廓裁片平移到右侧单独展示
         front_panel = getattr(points, 'front_panel_outline', None)
         if front_panel:
@@ -817,6 +975,14 @@ class SimpleDXFExporter:
             offset_x = points.front_rise.crotch_extension_point[0] + 8.0 - panel_min_x
             dxf_fp_points = [((x + offset_x) * self.scale, y * self.scale) for x, y in front_panel]
             msp.add_lwpolyline(dxf_fp_points, close=True)
+            # 裁片上的前门襟（门襟线 + 门襟弧线）
+            fly = getattr(points, 'front_fly', None)
+            if fly is not None:
+                fly_start = ((fly.fly_start_point[0] + offset_x) * self.scale, fly.fly_start_point[1] * self.scale)
+                fly_arc_start = ((fly.fly_end_point[0] + offset_x) * self.scale, fly.fly_end_point[1] * self.scale)
+                msp.add_line(fly_start, fly_arc_start)
+                fly_curve_pts = [((x + offset_x) * self.scale, y * self.scale) for x, y in fly.fly_curve]
+                msp.add_lwpolyline(fly_curve_pts)
 
         # 如果有月牙袋，也添加月牙袋轮廓
         if hasattr(points, 'crescent_pocket'):

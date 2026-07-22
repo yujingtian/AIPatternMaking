@@ -183,6 +183,20 @@ class JeansPatternCalculator:
             lower_waistline_curve
         )
 
+        # 裁片拆分: 前腰头裁片（省道拼合后）
+        front_waistband_outline = self._calculate_front_waistband_outline(
+            waistband, crescent_pocket, outer_seam_curve,
+            front_rise_curve, waistline_curve, lower_waistline_curve
+        )
+
+        # 裁片拆分: 袋贴裁片
+        pocket_patch_outline = self._calculate_pocket_patch_outline(
+            waistband, pocket_patch, outer_seam_curve, lower_waistline_curve
+        )
+
+        # 裁片拆分: 小表袋裁片
+        watch_pocket_outline = self._calculate_watch_pocket_outline(watch_pocket)
+
         # 组装所有点
         self.points = PatternPoints(
             params=self.params,
@@ -202,7 +216,10 @@ class JeansPatternCalculator:
             front_rise_curve=front_rise_curve,
             waistline_curve=waistline_curve,
             lower_waistline_curve=lower_waistline_curve,
-            front_panel_outline=front_panel_outline
+            front_panel_outline=front_panel_outline,
+            front_waistband_outline=front_waistband_outline,
+            pocket_patch_outline=pocket_patch_outline,
+            watch_pocket_outline=watch_pocket_outline
         )
 
         return self.points
@@ -873,6 +890,116 @@ class JeansPatternCalculator:
             front_rise_curve, crotch_ext_point, waistband.lower_waist_inner
         )
         outline.extend(rise_seg[1:])
+        return outline
+
+    def _make_rigid_transform(self, src_p: Tuple[float, float], src_q: Tuple[float, float],
+                               dst_p: Tuple[float, float], dst_q: Tuple[float, float]):
+        """构造刚体变换（旋转+平移）：将 src_p 映射到 dst_p，
+        并将 src_p→src_q 的方向旋转到 dst_p→dst_q 的方向。
+        返回变换函数 T(p)。"""
+        a_src = math.atan2(src_q[1] - src_p[1], src_q[0] - src_p[0])
+        a_dst = math.atan2(dst_q[1] - dst_p[1], dst_q[0] - dst_p[0])
+        theta = a_dst - a_src
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+        def transform(p: Tuple[float, float]) -> Tuple[float, float]:
+            dx, dy = p[0] - src_p[0], p[1] - src_p[1]
+            return (dst_p[0] + dx * cos_t - dy * sin_t,
+                    dst_p[1] + dx * sin_t + dy * cos_t)
+
+        return transform
+
+    def _calculate_front_waistband_outline(self, waistband: WaistbandPoints,
+                                            crescent_pocket: CrescentPocketPoints,
+                                            outer_seam_curve: List[Tuple[float, float]],
+                                            front_rise_curve: List[Tuple[float, float]],
+                                            waistline_curve: List[Tuple[float, float]],
+                                            lower_waistline_curve: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """裁片拆分: 前腰头裁片（闭合，省道已拼合）
+        腰头的0.6cm省道段（月牙袋宽顶点~月牙袋省道点）不要，将省道点一侧的部分
+        整体旋转平移，使月牙袋省道点与月牙袋宽顶点重合、袋省线省点与袋省线宽点重合。
+        轮廓构成（从下腰头外端点出发）：
+        1. 下腰头段（外缝侧）：下腰头外端点 → 月牙袋宽顶点
+        2. 下腰头段（内缝侧，拼合后）：月牙袋省道点 → 下腰头内端点（经刚体变换）
+        3. 内缝侧边：下腰头内端点 → 上腰头内端点（沿前浪，经刚体变换）
+        4. 上腰头段（内缝侧，拼合后）：上腰头内端点 → 袋省线省点（经刚体变换）
+        5. 上腰头段（外缝侧）：袋省线宽点 → 上腰头外端点
+        6. 外缝侧边：上腰头外端点 → 下腰头外端点（沿外侧缝），闭合
+        """
+        pocket = crescent_pocket
+        # 刚体变换：省道点 → 宽顶点，袋省线省点 → 袋省线宽点
+        T = self._make_rigid_transform(
+            pocket.pocket_dart, pocket.pocket_dart_line_dart,
+            pocket.pocket_width, pocket.pocket_dart_line_width
+        )
+
+        outline = []
+        # 1. 下腰头段（外缝侧）：下腰头外端点 → 月牙袋宽顶点
+        outline.extend(self._extract_curve_segment_exact(
+            lower_waistline_curve, waistband.lower_waist_outer, pocket.pocket_width
+        ))
+        # 2. 下腰头段（内缝侧，拼合后）：月牙袋省道点 → 下腰头内端点
+        seg = self._extract_curve_segment_exact(
+            lower_waistline_curve, pocket.pocket_dart, waistband.lower_waist_inner
+        )
+        outline.extend([T(p) for p in seg[1:]])
+        # 3. 内缝侧边：下腰头内端点 → 上腰头内端点（沿前浪）
+        seg = self._extract_curve_segment_exact(
+            front_rise_curve, waistband.lower_waist_inner, waistband.waist_inner_final
+        )
+        outline.extend([T(p) for p in seg[1:]])
+        # 4. 上腰头段（内缝侧，拼合后）：上腰头内端点 → 袋省线省点
+        seg = self._extract_curve_segment_exact(
+            waistline_curve, pocket.pocket_dart_line_dart, waistband.waist_inner_final
+        )
+        outline.extend([T(p) for p in reversed(seg)][1:])
+        # 5. 上腰头段（外缝侧）：袋省线宽点 → 上腰头外端点
+        outline.extend(self._extract_curve_segment_exact(
+            waistline_curve, pocket.pocket_dart_line_width, waistband.waist_outer
+        )[1:])
+        # 6. 外缝侧边：上腰头外端点 → 下腰头外端点（沿外侧缝），闭合
+        outline.extend(self._extract_curve_segment_exact(
+            outer_seam_curve, waistband.waist_outer, waistband.lower_waist_outer
+        )[1:])
+        return outline
+
+    def _calculate_pocket_patch_outline(self, waistband: WaistbandPoints,
+                                         pocket_patch: PocketPatchPoints,
+                                         outer_seam_curve: List[Tuple[float, float]],
+                                         lower_waistline_curve: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        """裁片拆分: 袋贴裁片（闭合）
+        轮廓构成（从袋贴下腰头顶点出发）：
+        1. 袋贴弧线：袋贴下腰头顶点 → 袋贴外缝顶点
+        2. 外侧缝段：袋贴外缝顶点 → 下腰头外缝顶点（沿外侧缝向上）
+        3. 下腰头段：下腰头外缝顶点 → 袋贴下腰头顶点（沿下腰头线），闭合
+        裁片上另需绘制：月牙袋弧线（宽顶点 → 外缝顶点）、小表袋轮廓（对位线）。
+        """
+        outline = []
+        # 1. 袋贴弧线（袋贴下腰头顶点 → 袋贴外缝顶点，patch_curve 方向一致）
+        outline.extend(pocket_patch.patch_curve)
+        # 2. 外侧缝段（袋贴外缝顶点 → 下腰头外缝顶点）
+        outline.extend(self._extract_curve_segment_exact(
+            outer_seam_curve, pocket_patch.patch_outer_seam, waistband.lower_waist_outer
+        )[1:])
+        # 3. 下腰头段（下腰头外缝顶点 → 袋贴下腰头顶点），闭合
+        outline.extend(self._extract_curve_segment_exact(
+            lower_waistline_curve, waistband.lower_waist_outer, pocket_patch.patch_lower_waist
+        )[1:])
+        return outline
+
+    def _calculate_watch_pocket_outline(self, watch_pocket: WatchPocketPoints) -> List[Tuple[float, float]]:
+        """裁片拆分: 小表袋裁片（闭合）
+        轮廓构成（从小表袋上外端点出发）：
+        1. 顶边：小表袋上外端点 → 小表袋上内端点
+        2. 内线：小表袋上内端点 → 小表袋下内端点
+        3. 底边：小表袋下内端点 → 小表袋下外端点（沿袋贴弧线）
+        4. 外线：小表袋下外端点 → 小表袋上外端点，闭合
+        """
+        wp = watch_pocket
+        outline = [wp.outer_upper, wp.inner_upper]     # 1. 顶边
+        outline.extend(wp.inner_line[1:])              # 2. 内线（上内 → 下内）
+        outline.extend(wp.bottom_curve[1:])            # 3. 底边（下内 → 下外，沿袋贴弧线）
+        outline.extend(reversed(wp.outer_line[:-1]))   # 4. 外线（下外 → 上外），闭合
         return outline
 
     def _get_crescent_pocket_controls(self, p0: Tuple[float, float],

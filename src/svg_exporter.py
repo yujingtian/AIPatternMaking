@@ -104,6 +104,33 @@ class SVGExporter:
             for (fx, fy) in points.front_panel_outline:
                 all_points.append((fx + front_panel_offset_x, fy))
 
+        # 前腰头裁片平移到门襟裁片下方单独展示
+        front_wb_offset_y = 0.0
+        if getattr(points, 'front_waistband_outline', None):
+            wb_max_y = max(p[1] for p in points.front_waistband_outline)
+            bottom_y = min(p[1] for p in all_points)
+            front_wb_offset_y = bottom_y - 5.0 - wb_max_y  # 与上方图形间隔5cm
+            for (fx, fy) in points.front_waistband_outline:
+                all_points.append((fx, fy + front_wb_offset_y))
+
+        # 袋贴裁片平移到前腰头裁片下方单独展示
+        patch_panel_offset_y = 0.0
+        if getattr(points, 'pocket_patch_outline', None):
+            patch_max_y = max(p[1] for p in points.pocket_patch_outline)
+            bottom_y = min(p[1] for p in all_points)
+            patch_panel_offset_y = bottom_y - 5.0 - patch_max_y  # 与上方图形间隔5cm
+            for (fx, fy) in points.pocket_patch_outline:
+                all_points.append((fx, fy + patch_panel_offset_y))
+
+        # 小表袋裁片平移到袋贴裁片下方单独展示
+        wp_panel_offset_y = 0.0
+        if getattr(points, 'watch_pocket_outline', None):
+            wp_max_y = max(p[1] for p in points.watch_pocket_outline)
+            bottom_y = min(p[1] for p in all_points)
+            wp_panel_offset_y = bottom_y - 5.0 - wp_max_y  # 与上方图形间隔5cm
+            for (fx, fy) in points.watch_pocket_outline:
+                all_points.append((fx, fy + wp_panel_offset_y))
+
         # 计算原始版型坐标的边界
         xs = [p[0] for p in all_points]
         ys = [p[1] for p in all_points]
@@ -147,6 +174,9 @@ class SVGExporter:
         svg_content.extend(self._draw_outline(points, to_svg))
         svg_content.extend(self._draw_fly_panel(points, to_svg, fly_panel_offset_y))
         svg_content.extend(self._draw_front_panel(points, to_svg, front_panel_offset_x))
+        svg_content.extend(self._draw_front_waistband(points, to_svg, front_wb_offset_y))
+        svg_content.extend(self._draw_pocket_patch_panel(points, to_svg, patch_panel_offset_y))
+        svg_content.extend(self._draw_watch_pocket_panel(points, to_svg, wp_panel_offset_y))
         svg_content.extend(self._draw_points(points, to_svg))
         if include_dimensions:
             svg_content.extend(self._draw_dimensions(points, to_svg, min_x, max_x, min_y, max_y))
@@ -416,12 +446,98 @@ class SVGExporter:
         panel_svg_points = [to_svg(x + offset_x, y) for x, y in outline]
         points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
         elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#2c3e50" stroke-width="3"/>')
+        # 裁片上的前门襟（门襟线 + 门襟弧线）
+        fly = getattr(points, 'front_fly', None)
+        if fly is not None:
+            elements.append(f'  <!-- 前片裁片上的前门襟 -->')
+            start_svg = to_svg(fly.fly_start_point[0] + offset_x, fly.fly_start_point[1])
+            arc_start_svg = to_svg(fly.fly_end_point[0] + offset_x, fly.fly_end_point[1])
+            elements.append(f'    <line x1="{start_svg[0]:.2f}" y1="{start_svg[1]:.2f}" x2="{arc_start_svg[0]:.2f}" y2="{arc_start_svg[1]:.2f}" stroke="#27ae60" stroke-width="2.5"/>')
+            fly_svg_points = [to_svg(x + offset_x, y) for x, y in fly.fly_curve]
+            fly_points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in fly_svg_points])
+            elements.append(f'    <polyline points="{fly_points_str}" fill="none" stroke="#27ae60" stroke-width="2.5"/>')
         # 裁片标注
         min_px = min(p[0] for p in outline) + offset_x
         max_px = max(p[0] for p in outline) + offset_x
         max_py = max(p[1] for p in outline)
         label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
         elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#2c3e50" font-weight="bold">前片</text>')
+        return elements
+
+    def _draw_front_waistband(self, points: PatternPoints, to_svg,
+                              offset_y: float) -> List[str]:
+        """单独绘制前腰头裁片（闭合轮廓，平移到门襟裁片下方）"""
+        elements = []
+        outline = getattr(points, 'front_waistband_outline', None)
+        if not outline:
+            return elements
+        elements.append(f'  <!-- 前腰头裁片（单独裁片） -->')
+        panel_svg_points = [to_svg(x, y + offset_y) for x, y in outline]
+        points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
+        elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#e67e22" stroke-width="3"/>')
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline) + offset_y
+        label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
+        elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#e67e22" font-weight="bold">前腰头</text>')
+        return elements
+
+    def _draw_pocket_patch_panel(self, points: PatternPoints, to_svg,
+                                 offset_y: float) -> List[str]:
+        """单独绘制袋贴裁片（闭合轮廓，平移到前腰头裁片下方）
+        裁片上同时绘制月牙袋弧线和小表袋轮廓作为对位线。"""
+        elements = []
+        outline = getattr(points, 'pocket_patch_outline', None)
+        if not outline:
+            return elements
+        elements.append(f'  <!-- 袋贴裁片（单独裁片） -->')
+        panel_svg_points = [to_svg(x, y + offset_y) for x, y in outline]
+        points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
+        elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#1abc9c" stroke-width="3"/>')
+
+        def draw_line(pts, color, width=2.0):
+            svg_pts = [to_svg(x, y + offset_y) for x, y in pts]
+            pts_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in svg_pts])
+            elements.append(f'    <polyline points="{pts_str}" fill="none" stroke="{color}" stroke-width="{width}"/>')
+
+        # 月牙袋弧线（袋口对位线）
+        pocket = getattr(points, 'crescent_pocket', None)
+        if pocket is not None:
+            draw_line(pocket.pocket_curve, '#9b59b6')
+        # 小表袋轮廓（对位线）：顶边 + 外线 + 内线 + 底边
+        wp = getattr(points, 'watch_pocket', None)
+        if wp is not None:
+            draw_line([wp.outer_upper, wp.inner_upper], '#f1c40f')   # 顶边
+            draw_line(wp.outer_line, '#f1c40f')                      # 外线
+            draw_line(wp.inner_line, '#f1c40f')                      # 内线
+            draw_line(wp.bottom_curve, '#f1c40f')                    # 底边
+
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline) + offset_y
+        label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
+        elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#1abc9c" font-weight="bold">袋贴</text>')
+        return elements
+
+    def _draw_watch_pocket_panel(self, points: PatternPoints, to_svg,
+                                 offset_y: float) -> List[str]:
+        """单独绘制小表袋裁片（闭合轮廓，平移到袋贴裁片下方）"""
+        elements = []
+        outline = getattr(points, 'watch_pocket_outline', None)
+        if not outline:
+            return elements
+        elements.append(f'  <!-- 小表袋裁片（单独裁片） -->')
+        panel_svg_points = [to_svg(x, y + offset_y) for x, y in outline]
+        points_str = ' '.join([f'{x:.2f},{y:.2f}' for x, y in panel_svg_points])
+        elements.append(f'    <polygon points="{points_str}" fill="none" stroke="#f1c40f" stroke-width="3"/>')
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        max_py = max(p[1] for p in outline) + offset_y
+        label_pos = to_svg((min_px + max_px) / 2, max_py + 1.5)
+        elements.append(f'    <text x="{label_pos[0]:.2f}" y="{label_pos[1]:.2f}" font-size="12" text-anchor="middle" fill="#f1c40f" font-weight="bold">小表袋</text>')
         return elements
 
     def _draw_crescent_pocket(self, points: PatternPoints, to_svg) -> List[str]:
