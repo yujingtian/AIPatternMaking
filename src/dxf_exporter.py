@@ -78,6 +78,8 @@ class DXFExporter:
             self._draw_back_waistband_panel(msp, points, back_points)
             # 单独绘制机头裁片（闭合裁片，腰省已拼合，平移到后腰头裁片下方）
             self._draw_jitou_panel(msp, points, back_points)
+            # 单独绘制后袋裁片（闭合裁片，平移到机头裁片下方）
+            self._draw_back_pocket_panel(msp, points, back_points)
 
         # 绘制关键点标注
         self._draw_points(msp, points)
@@ -118,6 +120,8 @@ class DXFExporter:
         doc.layers.add(name='BACKWAISTBANDPANEL', color=30)
         # 机头裁片层 - 紫色
         doc.layers.add(name='JITOUPANEL', color=6)
+        # 后袋裁片层 - 橙色
+        doc.layers.add(name='BACKPOCKETPANEL', color=30)
         # 轮廓线层 - 白色/黑色
         doc.layers.add(name='OUTLINE', color=7)
         # 腰头层 - 橙色
@@ -692,7 +696,7 @@ class DXFExporter:
                               back_points: Optional[BackPatternPoints] = None) -> float:
         """计算纵向堆叠裁片区域的底部Y坐标
         level 为当前裁片上方已堆叠的裁片个数：
-        0=门襟裁片之上无前片外裁片，1=门襟，2=+前腰头，3=+袋贴，4=+小表袋，5=+袋布，6=+后腰头"""
+        0=门襟裁片之上无前片外裁片，1=门襟，2=+前腰头，3=+袋贴，4=+小表袋，5=+袋布，6=+后腰头，7=+机头"""
         bottom_y = 0.0
         fly = getattr(points, 'front_fly', None)
         stacked = [
@@ -702,11 +706,32 @@ class DXFExporter:
             getattr(points, 'watch_pocket_outline', None),             # 小表袋裁片
             getattr(points, 'pocket_bag_outline', None),               # 袋布裁片
             getattr(back_points, 'back_waistband_outline', None) if back_points else None,  # 后腰头裁片
+            getattr(back_points, 'jitou_panel_outline', None) if back_points else None,     # 机头裁片
         ]
         for panel in stacked[:level]:
             if panel:
                 bottom_y = bottom_y - 5.0 - (max(p[1] for p in panel) - min(p[1] for p in panel))
         return bottom_y
+
+    def _draw_back_pocket_panel(self, msp: Modelspace, points: PatternPoints,
+                                back_points: BackPatternPoints) -> None:
+        """单独绘制后袋裁片（闭合轮廓，直接取后口袋轮廓，平移到机头裁片下方）"""
+        bp = back_points.back_pocket
+        outline = bp.pocket_outline if bp is not None else None
+        if not outline:
+            return
+        bottom_y = self._panel_stack_bottom_y(points, level=7, back_points=back_points)
+        bp_max_y = max(p[1] for p in outline)
+        offset_y = bottom_y - 5.0 - bp_max_y  # 与上方图形间隔5cm
+        # pocket_outline 首尾已闭合，无需 close=True
+        dxf_pts = [self._to_dxf_coords(x, y + offset_y) for x, y in outline]
+        msp.add_lwpolyline(dxf_pts, dxfattribs={'layer': 'BACKPOCKETPANEL'})
+        # 裁片标注
+        min_px = min(p[0] for p in outline)
+        max_px = max(p[0] for p in outline)
+        label_x, label_y = self._to_dxf_coords((min_px + max_px) / 2, bp_max_y + offset_y + 1.5)
+        text = msp.add_text('BACK_POCKET', dxfattribs={'layer': 'BACKPOCKETPANEL', 'height': 2.5 * self.scale})
+        text.dxf.insert = (label_x, label_y)
 
     def _draw_jitou_panel(self, msp: Modelspace, points: PatternPoints,
                           back_points: BackPatternPoints) -> None:

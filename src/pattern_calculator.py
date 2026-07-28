@@ -1231,6 +1231,7 @@ class JeansPatternCalculator:
                                  lower_waistline_curve: List[Tuple[float, float]]) -> PocketPatchPoints:
         """步骤12: 计算袋贴"""
         patch_offset = 3.5  # 袋贴与月牙袋省道弧线的距离
+        start_tangent_scale = 1.35  # 袋贴弧线起点切线放大系数（竖直段长度）
 
         # 1. 袋贴下腰头顶点：月牙袋省道点沿下腰头线继续向内侧扩展3.5cm
         #    月牙袋省道点位于下腰头起点(下腰头外缝顶点)起算10.6cm处，再扩展3.5cm
@@ -1245,7 +1246,8 @@ class JeansPatternCalculator:
 
         # 3. 袋贴弧线：与月牙袋省道弧线保持3.5cm距离（沿外法线方向偏移）
         patch_curve = self._calculate_pocket_patch_curve(
-            crescent_pocket, patch_lower_waist, patch_outer_seam, patch_offset
+            crescent_pocket, patch_lower_waist, patch_outer_seam, patch_offset,
+            lower_waistline_curve, start_tangent_scale
         )
 
         return PocketPatchPoints(
@@ -1257,35 +1259,124 @@ class JeansPatternCalculator:
     def _calculate_pocket_patch_curve(self, crescent_pocket: CrescentPocketPoints,
                                        patch_lower_waist: Tuple[float, float],
                                        patch_outer_seam: Tuple[float, float],
-                                       offset: float) -> List[Tuple[float, float]]:
-        """计算袋贴弧线（与月牙袋省道弧线平行，沿外法线向外偏移offset cm）
+                                       offset: float,
+                                       lower_waistline_curve: List[Tuple[float, float]],
+                                       start_tangent_scale: float = 2.0) -> List[Tuple[float, float]]:
+        """计算袋贴弧线（与月牙袋省道弧线平行，处处保持 offset cm 距离）
 
-        端点使用袋贴下腰头顶点与袋贴外缝顶点（落在外缝与下腰头上），
-        中间控制点取月牙袋省道弧线的两个控制点沿外法线方向偏移offset后的点，
-        从而保证袋贴弧线与月牙袋省道弧线整体保持offset的距离。
+        算法：
+        1. 将省道弧线采样点沿各自局部外法线偏移 offset，得到目标平行点列；
+        2. 起点切线固定为下腰头线在袋贴下腰头顶点处的垂线方向（竖直向下），
+           弧线从腰头出来先直着向下走一段，不会过早向左弯成"四分之一圆"；
+           终点切线取省道弧线终点的切线方向，弧线在外缝端自然放平；
+        3. 控制点约束在两端切线射线上（P1 = P0 + s·T0，P2 = P3 - u·Te），
+           对目标点列做最小二乘拟合求出 s、u，使弧线饱满且与省道弧线近似等距。
         """
-        # 月牙袋弧线的控制点与外法线方向（向右下方，即外侧）
-        ctrl1_pocket, ctrl2_pocket, perp_dx, perp_dy = self._get_crescent_pocket_controls(
-            crescent_pocket.pocket_outer, crescent_pocket.pocket_width, 3.0
-        )
+        dart_curve = crescent_pocket.pocket_dart_curve  # 方向: 省道点 → 外缝顶点
+        n = len(dart_curve)
 
-        # 月牙袋省道弧线的控制点（与 _calculate_crescent_pocket_dart_curve 保持一致）
-        ctrl1_dart = ctrl1_pocket                              # 靠近外缝顶点侧
-        extra_offset = 1.5
-        ctrl2_dart = (ctrl2_pocket[0] + perp_dx * extra_offset,
-                      ctrl2_pocket[1] + perp_dy * extra_offset)  # 靠近宽顶点/省道点侧
+        # 1. 目标点列：省道弧线各点沿局部外法线偏移 offset
+        offset_pts = []
+        for j in range(n):
+            i0 = max(j - 1, 0)
+            i1 = min(j + 1, n - 1)
+            tx = dart_curve[i1][0] - dart_curve[i0][0]
+            ty = dart_curve[i1][1] - dart_curve[i0][1]
+            tl = math.hypot(tx, ty)
+            if tl < 1e-9:
+                tl = 1.0
+            tx, ty = tx / tl, ty / tl
+            # 外法线：切线顺时针旋转90°，确保指向右下（X正、Y负）
+            nx, ny = ty, -tx
+            if nx < 0 or ny > 0:
+                nx, ny = -nx, -ny
+            offset_pts.append((dart_curve[j][0] + nx * offset,
+                               dart_curve[j][1] + ny * offset))
 
-        # 袋贴控制点：省道弧线控制点沿外法线再偏移offset
-        patch_ctrl_near_waist = (ctrl2_dart[0] + perp_dx * offset,
-                                 ctrl2_dart[1] + perp_dy * offset)
-        patch_ctrl_near_outer = (ctrl1_dart[0] + perp_dx * offset,
-                                 ctrl1_dart[1] + perp_dy * offset)
+        # 2. 端点切线方向
+        # 起点：下腰头线在袋贴下腰头顶点处的垂线（指向裤身内侧下方）
+        i = min(range(len(lower_waistline_curve)),
+                key=lambda k: point_distance(lower_waistline_curve[k], patch_lower_waist))
+        w0 = lower_waistline_curve[max(i - 1, 0)]
+        w1 = lower_waistline_curve[min(i + 1, len(lower_waistline_curve) - 1)]
+        wtx = w1[0] - w0[0]
+        wty = w1[1] - w0[1]
+        wl = math.hypot(wtx, wty)
+        if wl < 1e-9:
+            wl = 1.0
+        wtx, wty = wtx / wl, wty / wl
+        # 顺时针旋转90°并确保指向Y负方向（向下）
+        t0x, t0y = wty, -wtx
+        if t0y > 0:
+            t0x, t0y = -t0x, -t0y
+        # 终点：省道弧线终点切线方向
+        tex = dart_curve[-1][0] - dart_curve[-2][0]
+        tey = dart_curve[-1][1] - dart_curve[-2][1]
+        tel = math.hypot(tex, tey)
+        if tel < 1e-9:
+            tel = 1.0
+        tex, tey = tex / tel, tey / tel
+
+        # 3. 最小二乘拟合：P1 = P0 + s·T0, P2 = P3 - u·Te
+        #    B(t) = a·P0 + b·P1 + c·P2 + d·P3，展开为 s、u 的线性式后解 2x2 正规方程
+        p0, p3 = patch_lower_waist, patch_outer_seam
+        sAA = sAC = sCC = sAR = sCR = 0.0
+        for j in range(n):
+            t = j / (n - 1)
+            a = (1 - t) ** 3
+            b = 3 * (1 - t) ** 2 * t
+            c = 3 * (1 - t) * t * t
+            dd = t ** 3
+            # 不含 s、u 的基量
+            bx = (a + b) * p0[0] + (c + dd) * p3[0]
+            by = (a + b) * p0[1] + (c + dd) * p3[1]
+            rx = offset_pts[j][0] - bx
+            ry = offset_pts[j][1] - by
+            ax_ = b * t0x
+            ay_ = b * t0y
+            cx_ = -c * tex
+            cy_ = -c * tey
+            sAA += ax_ * ax_ + ay_ * ay_
+            sAC += ax_ * cx_ + ay_ * cy_
+            sCC += cx_ * cx_ + cy_ * cy_
+            sAR += ax_ * rx + ay_ * ry
+            sCR += cx_ * rx + cy_ * ry
+        det = sAA * sCC - sAC * sAC
+        if abs(det) < 1e-12:
+            s = u = offset  # 退化兜底
+        else:
+            s = (sAR * sCC - sCR * sAC) / det
+            u = (sCR * sAA - sAR * sAC) / det
+        # 放大起点切线长度：让弧线从腰头出来后沿竖直方向多走一段再左弯
+        s *= start_tangent_scale
+        s = max(s, 0.1)
+        # s 固定后重新一维最小二乘拟合 u，使弧线其余部分仍贴合偏移点列
+        # min Σ|s·A + u·C - R|² → u = ΣC·(R - s·A) / ΣC·C
+        sCRs = 0.0
+        for j in range(n):
+            t = j / (n - 1)
+            a = (1 - t) ** 3
+            b = 3 * (1 - t) ** 2 * t
+            c = 3 * (1 - t) * t * t
+            dd = t ** 3
+            bx = (a + b) * p0[0] + (c + dd) * p3[0]
+            by = (a + b) * p0[1] + (c + dd) * p3[1]
+            rx = offset_pts[j][0] - bx - s * b * t0x
+            ry = offset_pts[j][1] - by - s * b * t0y
+            cx_ = -c * tex
+            cy_ = -c * tey
+            sCRs += cx_ * rx + cy_ * ry
+        if sCC > 1e-12:
+            u = sCRs / sCC
+        u = max(u, 0.1)
+        ctrl1 = (p0[0] + s * t0x, p0[1] + s * t0y)
+        ctrl2 = (p3[0] - u * tex, p3[1] - u * tey)
 
         # 袋贴弧线方向：袋贴下腰头顶点 → 袋贴外缝顶点
         return sample_bezier_curve([
             patch_lower_waist,
-            patch_ctrl_near_waist,
-            patch_ctrl_near_outer,
+            ctrl1,
+            ctrl2,
             patch_outer_seam
         ], samples=60)
 
